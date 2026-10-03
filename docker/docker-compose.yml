@@ -1,0 +1,168 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for Banking Application
+  postgres-banking:
+    image: postgres:16-alpine
+    container_name: banking-postgres
+    environment:
+      POSTGRES_DB: ${BANKING_DB_NAME:-banking_db}
+      POSTGRES_USER: ${BANKING_DB_USER:-banking_user}
+      POSTGRES_PASSWORD: ${BANKING_DB_PASSWORD:-banking_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - banking_postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "${BANKING_DB_PORT:-5432}:5432"
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${BANKING_DB_USER:-banking_user} -d ${BANKING_DB_NAME:-banking_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # PostgreSQL Database for Keycloak
+  postgres-keycloak:
+    image: postgres:16-alpine
+    container_name: keycloak-postgres
+    environment:
+      POSTGRES_DB: ${KEYCLOAK_DB_NAME:-keycloak_db}
+      POSTGRES_USER: ${KEYCLOAK_DB_USER:-keycloak_user}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - keycloak_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${KEYCLOAK_DB_PORT:-5433}:5432"
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KEYCLOAK_DB_USER:-keycloak_user} -d ${KEYCLOAK_DB_NAME:-keycloak_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Keycloak Identity Server
+  keycloak:
+    build:
+      context: ./keycloak
+      dockerfile: Dockerfile
+    container_name: banking-keycloak
+    environment:
+      # Database Configuration
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/${KEYCLOAK_DB_NAME:-keycloak_db}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER:-keycloak_user}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak_password}
+
+      # Keycloak Configuration
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-localhost}
+      KC_HOSTNAME_PORT: ${KEYCLOAK_PORT:-8080}
+      KC_HTTP_PORT: 8080
+      KC_HTTPS_PORT: 8443
+      KC_HTTP_ENABLED: true
+      KC_PROXY: edge
+
+      # Admin Configuration
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+
+      # Features
+      KC_FEATURES: preview,admin-fine-grained-authz
+
+      # Logging
+      KC_LOG_LEVEL: ${KEYCLOAK_LOG_LEVEL:-INFO}
+
+      # Cache
+      KC_CACHE: local
+
+      # Theme
+      KC_THEMES: banking
+
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./keycloak/themes:/opt/keycloak/themes
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+      - "${KEYCLOAK_HTTPS_PORT:-8443}:8443"
+    networks:
+      - banking-network
+    depends_on:
+      postgres-keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    command: ["start-dev", "--spi-theme-welcome-theme=banking"]
+
+  # Optional: PgAdmin for Database Management
+  pgadmin:
+    image: dpage/pgadmin4:8
+    container_name: banking-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@bank.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    networks:
+      - banking-network
+    depends_on:
+      - postgres-banking
+      - postgres-keycloak
+    restart: unless-stopped
+
+  # Optional: Redis for Caching
+  redis:
+    image: redis:7-alpine
+    container_name: banking-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Optional: Mailhog for Email Testing
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: banking-mailhog
+    ports:
+      - "${MAILHOG_SMTP_PORT:-1025}:1025"
+      - "${MAILHOG_UI_PORT:-8025}:8025"
+    networks:
+      - banking-network
+    restart: unless-stopped
+
+networks:
+  banking-network:
+    driver: bridge
+    name: banking-network
+
+volumes:
+  banking_postgres_data:
+    driver: local
+  keycloak_postgres_data:
+    driver: local
+  keycloak_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+  redis_data:
+    driver: local

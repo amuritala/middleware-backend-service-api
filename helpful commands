@@ -1,0 +1,275 @@
+
+Make Scripts Executable
+chmod +x scripts/keycloak-setup.sh
+
+# Navigate to docker directory
+cd docker
+
+# Start all services
+docker-compose up -d
+
+# Watch logs
+docker-compose logs -f
+
+
+# Stop all services:
+docker-compose down
+
+Stop and remove volumes (clean start):
+
+docker-compose down -v
+Check service health:
+
+# Check all containers
+docker-compose ps
+
+# Check specific service
+docker-compose ps keycloak
+Access services:
+
+Service	URL	Credentials
+Keycloak Admin Console	http://localhost:8080	admin / admin
+Banking Application	http://localhost:8080 (Spring Boot)	-
+PgAdmin	http://localhost:5050	admin@bank.com / admin
+Mailhog UI	http://localhost:8025	-
+View logs:
+
+bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f keycloak
+docker-compose logs -f postgres-banking
+Execute commands in containers:
+
+bash
+# Keycloak
+docker exec -it banking-keycloak /bin/bash
+
+# PostgreSQL Banking
+docker exec -it banking-postgres psql -U banking_user -d banking_db
+
+# PostgreSQL Keycloak
+docker exec -it keycloak-postgres psql -U keycloak_user -d keycloak_db
+9. Docker Commands Cheat Sheet
+
+bash
+# ====================
+# Basic Docker Commands
+# ====================
+
+# List running containers
+docker ps
+
+# List all containers (including stopped)
+docker ps -a
+
+# List images
+docker images
+
+# List volumes
+docker volume ls
+
+# Clean up
+docker system prune -a
+docker volume prune
+
+# ====================
+# Service Management
+# ====================
+
+# Start a specific service
+docker-compose up -d postgres-banking
+
+# Stop a specific service
+docker-compose stop postgres-banking
+
+# Restart a service
+docker-compose restart keycloak
+
+# Scale a service
+docker-compose up -d --scale keycloak=2
+
+# ====================
+# Database Operations
+# ====================
+
+# Create database backup
+docker exec banking-postgres pg_dump -U banking_user banking_db > backup.sql
+
+# Restore database
+cat backup.sql | docker exec -i banking-postgres psql -U banking_user -d banking_db
+
+# Connect to PostgreSQL
+docker exec -it banking-postgres psql -U banking_user -d banking_db
+
+# ====================
+# Keycloak Operations
+# ====================
+
+# Export realm configuration
+docker exec -it banking-keycloak /opt/keycloak/bin/kc.sh export \
+    --file /opt/keycloak/data/import/realm-export.json \
+    --realm banking
+
+# Import realm configuration (via Dockerfile or manually)
+docker cp realm-export.json banking-keycloak:/opt/keycloak/data/import/
+docker exec -it banking-keycloak /opt/keycloak/bin/kc.sh import \
+    --file /opt/keycloak/data/import/realm-export.json
+
+# ====================
+# Network Operations
+# ====================
+
+# Inspect network
+docker network inspect banking-network
+
+# Connect a container to network
+docker network connect banking-network container-name
+10. Environment-Specific Configurations
+
+Development (docker-compose.override.yml)
+
+yaml
+version: '3.8'
+
+services:
+  keycloak:
+    environment:
+      KC_LOG_LEVEL: DEBUG
+    command: ["start-dev", "--spi-theme-welcome-theme=banking", "--http-relative-path=/auth"]
+Production (docker-compose.prod.yml)
+
+yaml
+version: '3.8'
+
+services:
+  keycloak:
+    environment:
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME}
+      KC_PROXY: edge
+      KC_HTTP_ENABLED: false
+      KC_HTTPS_PORT: 8443
+      KC_HTTPS_CERTIFICATE_FILE: /etc/x509/https/tls.crt
+      KC_HTTPS_CERTIFICATE_KEY_FILE: /etc/x509/https/tls.key
+    volumes:
+      - ./certs:/etc/x509/https
+    command: ["start", "--optimized"]
+11. Keycloak Admin CLI Commands
+
+bash
+# ====================
+# Realms
+# ====================
+
+# List realms
+kcadm.sh get realms
+
+# Create realm
+kcadm.sh create realms -s realm=banking -s enabled=true
+
+# ====================
+# Users
+# ====================
+
+# Create user
+kcadm.sh create users -r banking -s username=johndoe -s enabled=true
+
+# Set password
+kcadm.sh set-password -r banking --username johndoe --new-password password123
+
+# List users
+kcadm.sh get users -r banking
+
+# ====================
+# Clients
+# ====================
+
+# Create client
+kcadm.sh create clients -r banking -s clientId=banking-api -s enabled=true
+
+# Get client secret
+kcadm.sh get clients/${CLIENT_UUID}/client-secret -r banking
+
+# ====================
+# Roles
+# ====================
+
+# Create role
+kcadm.sh create roles -r banking -s name=ROLE_ADMIN
+
+# Assign role to user
+kcadm.sh add-roles -r banking --uusername johndoe --rolename ROLE_ADMIN
+12. Troubleshooting
+
+Common Issues and Solutions
+
+Port conflicts:
+
+bash
+# Check if ports are in use
+sudo lsof -i :8080
+sudo lsof -i :5432
+
+# Kill process using port
+sudo kill -9 PID
+Database connection issues:
+
+bash
+# Check if database is ready
+docker exec banking-postgres pg_isready -U banking_user
+
+# Check database logs
+docker-compose logs postgres-banking
+Keycloak startup issues:
+
+bash
+# Check Keycloak logs
+docker-compose logs keycloak
+
+# Restart Keycloak with more memory
+docker-compose up -d --force-recreate keycloak
+Volume permission issues:
+
+bash
+# Fix permissions
+docker run --rm -v banking_postgres_data:/data alpine chmod -R 777 /data
+Reset everything:
+
+bash
+# Stop and remove everything
+docker-compose down -v
+
+# Remove unused volumes
+docker volume prune -f
+
+# Start fresh
+docker-compose up -d
+13. Useful SQL Queries for Banking Database
+
+sql
+-- Connect to banking database
+docker exec -it banking-postgres psql -U banking_user -d banking_db
+
+-- Check all clients
+SELECT id, company_name, email, status, created_at FROM clients;
+
+-- Count clients by status
+SELECT status, COUNT(*) FROM clients GROUP BY status;
+
+-- Check API keys
+SELECT c.company_name, a.api_key, a.active, a.created_at, a.last_used_at
+FROM api_keys a
+JOIN clients c ON a.client_id = c.id;
+
+-- Find inactive clients
+SELECT * FROM clients WHERE status IN ('SUSPENDED', 'INACTIVE');
+
+-- Find expired API keys
+SELECT * FROM api_keys WHERE expires_at < NOW();
+
+-- Check user activity
+SELECT username, email, last_login, created_at FROM users
+WHERE last_login > NOW() - INTERVAL '30 days';
+This Docker Compose setup provides a complete development environment for your banking onboarding platform with all necessary services. Let me know if you need any modifications or additional services!

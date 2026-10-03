@@ -1,0 +1,55 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: banking-onboarding-api
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/banking_db
+    username: ${DB_USERNAME:banking_user}
+    password: ${DB_PASSWORD:SecureBankingPass123!}
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/banking}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8080/realms/banking/protocol/openid-connect/certs}
+
+# Keycloak admin client only needed for user registration
+keycloak:
+  auth-server-url: ${KEYCLOAK_AUTH_URL:http://localhost:8080}
+  realm: ${KEYCLOAK_REALM:banking}
+  resource: ${KEYCLOAK_CLIENT_ID:banking-onboarding-api}
+  credentials:
+    secret: ${KEYCLOAK_CLIENT_SECRET:wRyRKKZiuFZWeJdBByoylpBeycRNue8y}
+  admin:
+    username: ${KEYCLOAK_ADMIN_USER:admin}
+    password: ${KEYCLOAK_ADMIN_PASSWORD:admin}
+
+springdoc:
+  swagger-ui:
+    oauth:
+      client-id: ${KEYCLOAK_SWAGGER_CLIENT_ID:banking-onboarding-api}
+      use-pkce-with-authorization-code-grant: true
+
+customer:
+  service:
+    url: ${CUSTOMER_SERVICE_URL:http://localhost:9001/}
+    max-buffer-size: ${CUSTOMER_SERVICE_MAXBUFFERSIZE:500000}
+
+account:
+  service:
+    url: ${ACCOUNT_SERVICE_URL:http://localhost:9004/}
+
+logging:
+  level:
+    org:
+      springframework:
+        security: DEBUG

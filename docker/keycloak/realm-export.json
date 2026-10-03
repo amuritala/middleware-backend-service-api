@@ -1,0 +1,294 @@
+{
+  "realm": "banking",
+  "displayName": "Banking Platform",
+  "enabled": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "rememberMe": true,
+  "verifyEmail": true,
+  "emailTheme": "banking",
+  "loginTheme": "banking",
+  "accountTheme": "banking",
+  "adminTheme": "banking",
+  "defaultRoles": [
+    "default-roles-banking"
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "ROLE_ADMIN",
+        "description": "Administrator role"
+      },
+      {
+        "name": "ROLE_CLIENT",
+        "description": "Client role"
+      },
+      {
+        "name": "ROLE_CREATE_CUSTOMER",
+        "description": "Create customer role"
+      },
+      {
+        "name": "ROLE_CHECK_BALANCE",
+        "description": "View Account Balance role"
+      },
+      {
+        "name": "ROLE_CREATE_ACCOUNT",
+        "description": "Create Account"
+      },
+      {
+        "name": "ROLE_PASS_ENTRY",
+        "description": "Debit Credit role"
+      },
+      {
+        "name": "ROLE_QUERY_CUSTOMER",
+        "description": "Query customer role"
+      },
+      {
+        "name": "ROLE_QUERY_AMOUNT_BLOCK",
+        "description": "Query amount block role"
+      },
+      {
+        "name": "ROLE_CREATE_JOINT_CUSTOMER",
+        "description": "Create joint customer role"
+      },
+      {
+        "name": "ROLE_CREATE_CORPORATE_CUSTOMER",
+        "description": "Create corporate customer role"
+      },
+      {
+        "name": "ROLE_CREATE_AMOUNT_BLOCK",
+        "description": "Create amount block role"
+      },
+      {
+        "name": "ROLE_VIEW_CUSTOMER_ACCOUNT_DETAILS",
+        "description": "View customer account details role"
+      },
+      {
+        "name": "ROLE_VIEW_SUMMARY_BALANCE",
+        "description": "View summary balance role"
+      },
+      {
+        "name": "ROLE_VIEW_FULL_ACCOUNT_BALANCE",
+        "description": "View full account balance role"
+      },
+      {
+        "name": "ROLE_CHECKOUT_ACCOUNT",
+        "description": "Checkout account role"
+      },
+      {
+        "name": "ROLE_VIEW_ACCOUNT_DETAILS",
+        "description": "View account details role"
+      },
+      {
+        "name": "ROLE_VIEW_ACCOUNT_STATEMENT",
+        "description": "View account statement role"
+      },
+      {
+        "name": "ROLE_REVERSE_TRANSACTION",
+        "description": "Reverse transaction role"
+      },
+      {
+        "name": "ROLE_QUERY_TRANSACTION",
+        "description": "Query transaction role"
+      },
+      {
+        "name": "ROLE_QUERY_PRODUCT",
+        "description": "Query product role"
+      },
+      {
+        "name": "ROLE_AUTHORIZE_TRANSACTION",
+        "description": "Authorize transaction role"
+      },
+      {
+        "name": "ROLE_VIEW_SIGNATURE_IMAGE",
+        "description": "View signature image role"
+      },
+      {
+        "name": "ROLE_VIEW_ACCOUNT_CLASS_DATA",
+        "description": "View account class reference data role"
+      },
+      {
+        "name": "ROLE_VIEW_CUSTOMER_STATS",
+        "description": "View customer statistics role"
+      },
+      {
+        "name": "ROLE_VIEW_AUDIT_TRAIL",
+        "description": "View audit trail role"
+      },
+      {
+        "name": "ROLE_VIEW_ACCOUNT_TRANSACTIONS",
+        "description": "View account transactions role"
+      },
+      {
+        "name": "ROLE_VIEW_CUSTOMER_STATEMENT",
+        "description": "View customer statement role"
+      },
+      {
+        "name": "ROLE_CREATE_DE_JOURNAL",
+        "description": "Create DE journal role"
+      },
+      {
+        "name": "ROLE_CREATE_DE_TEMPLATE",
+        "description": "Create DE template role"
+      },
+      {
+        "name": "ROLE_CREATE_TELLER",
+        "description": "Create teller role"
+      },
+      {
+        "name": "ROLE_AUTHORIZE_DE_TRANSACTION",
+        "description": "Authorize DE transaction role"
+      },
+      {
+        "name": "ROLE_CHANGE_ACCOUNT_STATUS",
+        "description": "Change account status role"
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@bank.com",
+      "firstName": "System",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ROLE_ADMIN"
+      ],
+      "groups": [
+        "admins"
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "banking-onboarding-api",
+      "name": "Banking API",
+      "description": "Banking Onboarding Platform API",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "redirectUris": [
+        "http://localhost:8080/*",
+        "http://localhost:5173/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8080",
+        "http://localhost:5173",
+        "http://localhost:3000"
+      ],
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "3600",
+        "refresh.token.lifespan": "86400"
+      }
+    },
+    {
+      "clientId": "banking-service-api",
+      "name": "Banking Service API",
+      "description": "Banking Service Platform API",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "redirectUris": [
+        "http://localhost:8080/*",
+        "http://localhost:5173/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8080",
+        "http://localhost:5173",
+        "http://localhost:3000"
+      ],
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "3600",
+        "refresh.token.lifespan": "86400"
+      }
+    },
+    {
+      "clientId": "banking-frontend",
+      "name": "Banking Frontend",
+      "description": "Banking Onboarding Platform Frontend",
+      "enabled": true,
+      "publicClient": true,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5173",
+        "http://localhost:3000"
+      ],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "banking-swagger",
+      "name": "Banking Swagger UI",
+      "description": "Swagger UI OAuth2 client for Banking Platform API",
+      "enabled": true,
+      "publicClient": true,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8082/swagger-ui/oauth2-redirect.html"
+      ],
+      "webOrigins": [
+        "http://localhost:8082"
+      ],
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "admins",
+      "realmRoles": [
+        "ROLE_ADMIN"
+      ]
+    },
+    {
+      "name": "clients",
+      "realmRoles": [
+        "ROLE_CLIENT"
+      ]
+    }
+  ],
+  "smtpServer": {
+    "host": "mailhog",
+    "port": "1025",
+    "from": "noreply@bank.com",
+    "auth": false,
+    "ssl": false,
+    "starttls": false
+  }
+}

@@ -1,0 +1,4 @@
+adminuser	admin1234	ROLE_ADMIN	Full access, admin panel
+clientuser	client123	ROLE_CLIENT	Client features
+vieweruser	viewer123	ROLE_VIEWER	Read-only access
+john.doe	password123	(assign manually)	Custom roles

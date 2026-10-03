@@ -1,0 +1,69 @@
+version: "3.8"
+
+services:
+
+  # ============================================================
+  # Banking API / Proxy
+  # ============================================================
+  banking-api:
+    image: docker.io/morufoyetechstack/banking-service-api:latest
+    container_name: banking-service-api
+
+    ports:
+      - "8088:8088"
+
+    environment:
+      # Customer service
+      CUSTOMER_SERVICE_URL: http://customer-service:8101/
+
+      # Account service
+      ACCOUNT_SERVICE_URL: http://account-service:8102/
+
+    depends_on:
+      - customer-service
+      - account-service
+
+    networks:
+      - banking-network
+
+
+  # ============================================================
+  # Customer Service
+  # ============================================================
+  customer-service:
+    image: your-customer-service-image:latest
+    container_name: customer-service
+
+    expose:
+      - "8101"
+
+    environment:
+      SERVER_PORT: 8101
+
+    networks:
+      - banking-network
+
+
+  # ============================================================
+  # Account Service
+  # ============================================================
+  account-service:
+    image: your-account-service-image:latest
+    container_name: account-service
+
+    expose:
+      - "8102"
+
+    environment:
+      SERVER_PORT: 8102
+
+    networks:
+      - banking-network
+
+
+# ==============================================================
+# Shared network
+# ==============================================================
+networks:
+  banking-network:
+    driver: bridge
