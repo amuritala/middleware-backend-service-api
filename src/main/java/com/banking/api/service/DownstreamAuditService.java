@@ -17,6 +17,7 @@ public class DownstreamAuditService {
         return repository.findAll(pageable).map(audit -> new DownstreamAuditResponse(
                 audit.getId(),
                 audit.getUserId(),
+                audit.getOperation(),
                 audit.getRequest(),
                 audit.getResponse(),
                 audit.getHttpStatus(),

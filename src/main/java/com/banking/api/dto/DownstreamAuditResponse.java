@@ -16,6 +16,9 @@ public record DownstreamAuditResponse(
         @Schema(description = "Id of the user the call was made for", example = "3fa85f64-5717-4562-b3fc-2c963f66afa6")
         String userId,
 
+        @Schema(description = "Service operation performed by the orchestrator", example = "queryCustomer")
+        String operation,
+
         @Schema(description = "Serialized request payload")
         String request,
 

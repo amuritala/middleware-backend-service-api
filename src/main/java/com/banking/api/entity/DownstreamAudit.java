@@ -27,6 +27,9 @@ public class DownstreamAudit {
     @Column(name = "user_id")
     private String userId;
 
+    @Column(name = "operation")
+    private String operation;
+
     @Column(name = "request_blob", columnDefinition = "TEXT", nullable = false)
     private String request;
 
