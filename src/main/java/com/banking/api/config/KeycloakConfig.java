@@ -4,9 +4,11 @@ import lombok.RequiredArgsConstructor;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.KeycloakBuilder;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.reactive.function.client.WebClient;
 
 @Configuration
 @RequiredArgsConstructor
@@ -39,6 +41,12 @@ public class KeycloakConfig {
                 .username(adminUsername)
                 .password(adminPassword)
                 .build();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public WebClient.Builder webClientBuilder() {
+        return WebClient.builder();
     }
 
     @Bean

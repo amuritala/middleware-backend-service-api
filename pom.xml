@@ -29,6 +29,7 @@
 	<properties>
 		<java.version>17</java.version>
 		<keycloak.version>23.0.7</keycloak.version>
+		<backend.image.tag>1.4</backend.image.tag>
 	</properties>
 
 	<dependencies>
@@ -40,6 +41,10 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webflux</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-mail</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -171,11 +176,16 @@
 				<artifactId>jib-maven-plugin</artifactId>
 				<version>3.4.0</version>
 				<configuration>
+					<from>
+						<platforms>
+							<platform>
+								<os>linux</os>
+								<architecture>amd64</architecture>
+							</platform>
+						</platforms>
+					</from>
 					<to>
-						<image>docker.io/morufoyetechstack/banking-service-api:${project.version}</image>
-						<tags>
-							<tag>latest</tag>
-						</tags>
+						<image>docker.io/techstackimagerepo/backend-service-api-service:${backend.image.tag}</image>
 					</to>
 					<container>
 						<jvmFlags>
@@ -183,11 +193,8 @@
 							<jvmFlag>-Xms256m</jvmFlag>
 						</jvmFlags>
 						<ports>
-							<port>8080</port>
+							<port>8081</port>
 						</ports>
-						<environment>
-							<SPRING_PROFILES_ACTIVE>docker</SPRING_PROFILES_ACTIVE>
-						</environment>
 					</container>
 				</configuration>
 			</plugin>

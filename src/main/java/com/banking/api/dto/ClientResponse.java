@@ -1,6 +1,7 @@
 package com.banking.api.dto;
 
 import com.banking.api.entity.ClientStatus;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -56,4 +57,8 @@ public class ClientResponse {
     private LocalDateTime approvedAt;
     @Schema(description = "Number of users belonging to this client", example = "3")
     private Integer userCount;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Schema(description = "Only returned when an admin creates the account: whether the welcome email with the "
+            + "temporary password was sent. When false, give the user the password another way.", example = "true")
+    private Boolean welcomeEmailSent;
 }

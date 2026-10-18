@@ -2,6 +2,7 @@ package com.banking.api.controller;
 
 import com.banking.api.dto.ApproveClientRequest;
 import com.banking.api.dto.ClientResponse;
+import com.banking.api.dto.CreateBankUserRequest;
 import com.banking.api.dto.RegisterRequest;
 import com.banking.api.dto.AdminUserResponse;
 import com.banking.api.dto.UpdateUserRequest;
@@ -81,6 +82,18 @@ public class AdminController {
     public ResponseEntity<ClientResponse> createClient(@Valid @RequestBody RegisterRequest request) {
         log.info("Admin creating client: {}", request.getCompanyName());
         return ResponseEntity.status(HttpStatus.CREATED).body(adminService.createClient(request));
+    }
+
+    @Operation(
+            summary = "Create a bank user",
+            description = "Creates a staff administrator with ROLE_ADMIN and a temporary password that is "
+                    + "emailed to them and must be changed at first sign-in.",
+            tags = "Admin - Users"
+    )
+    @PostMapping("/users")
+    public ResponseEntity<AdminUserResponse> createBankUser(@Valid @RequestBody CreateBankUserRequest request) {
+        log.info("Admin creating bank user: {}", request.getEmail());
+        return ResponseEntity.status(HttpStatus.CREATED).body(adminService.createBankUser(request));
     }
 
     @Operation(

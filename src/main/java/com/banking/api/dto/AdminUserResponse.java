@@ -28,6 +28,10 @@ public record AdminUserResponse(
         boolean emailVerified,
 
         @Schema(description = "Realm roles currently assigned", example = "[\"ROLE_CLIENT\",\"ROLE_VIEWER\"]")
-        List<String> roles
+        List<String> roles,
+
+        @Schema(description = "BANK_USER for staff holding ROLE_ADMIN, otherwise CLIENT (vendor user)",
+                example = "CLIENT")
+        String userType
 ) {
 }

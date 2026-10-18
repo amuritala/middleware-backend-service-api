@@ -1,6 +1,7 @@
 package com.banking.api.service;
 
 import com.banking.api.dto.ClientResponse;
+import com.banking.api.dto.CreateBankUserRequest;
 import com.banking.api.dto.RegisterRequest;
 import com.banking.api.entity.ApiKey;
 import com.banking.api.entity.Client;
@@ -44,6 +45,7 @@ public class AdminService {
     private final ApiKeyRepository apiKeyRepository;
     private final UserRepository userRepository;
     private final Keycloak keycloakAdmin;
+    private final WelcomeEmailService welcomeEmailService;
 
     @Value("${keycloak.realm}")
     private String realm;
@@ -106,7 +108,55 @@ public class AdminService {
 
         log.info("Admin-created client {} is ACTIVE (temporary password for {})",
                 savedClient.getCompanyName(), request.getContactEmail());
-        return toClientResponse(savedClient);
+        // 5. Email the temporary password. A mail failure must not undo the account.
+        boolean emailSent = welcomeEmailService.sendTemporaryPassword(
+                request.getContactEmail(), request.getContactFirstName(), request.getPassword());
+
+        ClientResponse response = toClientResponse(savedClient);
+        response.setWelcomeEmailSent(emailSent);
+        return response;
+    }
+
+    /**
+     * Creates a bank user (staff administrator): ROLE_ADMIN, no client company, and flagged so
+     * the temporary password must be replaced at first sign-in.
+     */
+    @Transactional
+    public AdminUserResponse createBankUser(CreateBankUserRequest request) {
+        if (userRepository.existsByUsername(request.getEmail())) {
+            throw new ApiException(
+                    "EMAIL_ALREADY_REGISTERED",
+                    "A user with this email address already exists",
+                    HttpStatus.CONFLICT
+            );
+        }
+
+        RegisterRequest credentials = RegisterRequest.builder()
+                .contactEmail(request.getEmail())
+                .contactFirstName(request.getFirstName())
+                .contactLastName(request.getLastName())
+                .password(request.getPassword())
+                .build();
+        String keycloakUserId = createKeycloakUser(credentials);
+
+        userRepository.save(User.builder()
+                .keycloakUserId(keycloakUserId)
+                .username(request.getEmail())
+                .email(request.getEmail())
+                .firstName(request.getFirstName())
+                .lastName(request.getLastName())
+                .role(Role.ROLE_ADMIN)
+                .enabled(true)
+                .mustChangePassword(true)
+                .build());
+
+        assignRealmRole(keycloakUserId, "ROLE_ADMIN");
+        log.info("Admin-created bank user {} with ROLE_ADMIN", request.getEmail());
+
+        welcomeEmailService.sendTemporaryPassword(
+                request.getEmail(), request.getFirstName(), request.getPassword());
+
+        return toAdminUserResponse(keycloakUser(keycloakUserId).toRepresentation());
     }
 
     private String createKeycloakUser(RegisterRequest request) {
@@ -424,7 +474,8 @@ public class AdminService {
                     user.getLastName(),
                     Boolean.TRUE.equals(user.isEnabled()),
                     Boolean.TRUE.equals(user.isEmailVerified()),
-                    roles
+                    roles,
+                    roles.contains("ROLE_ADMIN") ? "BANK_USER" : "CLIENT"
             );
     }
 
