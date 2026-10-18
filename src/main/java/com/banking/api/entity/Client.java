@@ -46,6 +46,10 @@ public class Client {
     @Column
     private String phone;
 
+    /** Phone number of the contact person, distinct from the company's own `phone`. */
+    @Column(name = "contact_phone")
+    private String contactPhone;
+
     @Column
     private String industry;
 

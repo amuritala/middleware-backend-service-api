@@ -16,10 +16,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Map;
 
 /**
  * Self-service account endpoints for any signed-in user - vendor or admin alike.
@@ -36,6 +39,29 @@ import org.springframework.web.bind.annotation.RestController;
 public class AccountController {
 
     private final AccountService accountService;
+
+    @Operation(
+            summary = "Must I change my password?",
+            description = "Tells the signed-in user whether its password is still the temporary credential an "
+                    + "administrator issued. Vendors created through the admin portal start flagged and cannot use "
+                    + "the rest of the portal until they set their own password; the flag clears on the first "
+                    + "successful password change. Self-registered vendors are never flagged.",
+            tags = "Account"
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Current credential state",
+                    content = @Content(schema = @Schema(implementation = Map.class))
+            )
+    })
+    @GetMapping("/credentials")
+    public ResponseEntity<Map<String, Boolean>> getCredentials(Authentication authentication) {
+        if (!(authentication.getPrincipal() instanceof Jwt jwt)) {
+            throw new IllegalStateException("JWT authentication is required");
+        }
+        return ResponseEntity.ok(accountService.getCredentials(jwt));
+    }
 
     @Operation(
             summary = "Change my password",

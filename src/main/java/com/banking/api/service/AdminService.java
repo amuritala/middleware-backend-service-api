@@ -1,10 +1,13 @@
 package com.banking.api.service;
 
 import com.banking.api.dto.ClientResponse;
+import com.banking.api.dto.RegisterRequest;
 import com.banking.api.entity.ApiKey;
 import com.banking.api.entity.Client;
 import com.banking.api.entity.ClientStatus;
+import com.banking.api.entity.Role;
 import com.banking.api.entity.User;
+import com.banking.api.exception.ApiException;
 import com.banking.api.repository.ApiKeyRepository;
 import com.banking.api.repository.ClientRepository;
 import com.banking.api.repository.UserRepository;
@@ -15,7 +18,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.admin.client.resource.UserResource;
+import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Value;
@@ -44,6 +49,107 @@ public class AdminService {
     private String realm;
 
     // === Client Management ===
+
+    /**
+     * Creates a vendor that is live immediately. Self-registrations land in PENDING and wait
+     * for review; an administrator-created account never enters that queue, because the admin
+     * has already vouched for it. The supplied password is only a temporary credential - the
+     * local user row is flagged so the vendor must set their own password at first sign-in.
+     */
+    @Transactional
+    public ClientResponse createClient(RegisterRequest request) {
+        if (userRepository.existsByUsername(request.getContactEmail())) {
+            throw new ApiException(
+                    "EMAIL_ALREADY_REGISTERED",
+                    "A user with this email address already exists",
+                    HttpStatus.CONFLICT
+            );
+        }
+
+        // 1. Keycloak user, enabled, carrying the temporary password.
+        String keycloakUserId = createKeycloakUser(request);
+
+        // 2. Local client record, active from the moment it is created.
+        Client client = Client.builder()
+                .companyName(request.getCompanyName())
+                .registrationNumber(request.getRegistrationNumber())
+                .contactFirstName(request.getContactFirstName())
+                .contactLastName(request.getContactLastName())
+                .email(request.getContactEmail())
+                .phone(request.getPhoneNumber())
+                .contactPhone(request.getContactPhone())
+                .country(request.getCountry())
+                .address(request.getCompanyAddress())
+                .taxId(request.getTaxId())
+                .industry(request.getIndustry())
+                .keycloakUserId(keycloakUserId)
+                .status(ClientStatus.ACTIVE)
+                .build();
+        Client savedClient = clientRepository.save(client);
+
+        // 3. Local user row, flagged for the forced password change at first sign-in.
+        User user = User.builder()
+                .keycloakUserId(keycloakUserId)
+                .username(request.getContactEmail())
+                .email(request.getContactEmail())
+                .firstName(request.getContactFirstName())
+                .lastName(request.getContactLastName())
+                .role(Role.ROLE_CLIENT)
+                .enabled(true)
+                .mustChangePassword(true)
+                .client(savedClient)
+                .build();
+        userRepository.save(user);
+
+        // 4. Realm role, so the vendor portal accepts them the moment they sign in.
+        assignRealmRole(keycloakUserId, "ROLE_CLIENT");
+
+        log.info("Admin-created client {} is ACTIVE (temporary password for {})",
+                savedClient.getCompanyName(), request.getContactEmail());
+        return toClientResponse(savedClient);
+    }
+
+    private String createKeycloakUser(RegisterRequest request) {
+        UserRepresentation user = new UserRepresentation();
+        user.setUsername(request.getContactEmail());
+        user.setEmail(request.getContactEmail());
+        user.setFirstName(request.getContactFirstName());
+        user.setLastName(request.getContactLastName());
+        user.setEnabled(true);
+        // An administrator supplied these details, so the address counts as verified.
+        user.setEmailVerified(true);
+
+        CredentialRepresentation credential = new CredentialRepresentation();
+        credential.setType(CredentialRepresentation.PASSWORD);
+        credential.setValue(request.getPassword());
+        credential.setTemporary(false);
+        user.setCredentials(List.of(credential));
+
+        try (var response = keycloakAdmin.realm(realm).users().create(user)) {
+            if (response.getStatus() == 409) {
+                throw new ApiException(
+                        "EMAIL_ALREADY_REGISTERED",
+                        "A user with this email address already exists",
+                        HttpStatus.CONFLICT
+                );
+            }
+            if (response.getStatus() != 201) {
+                throw new RuntimeException("Failed to create Keycloak user");
+            }
+            return response.getLocation().getPath().replaceAll(".*/([^/]+)$", "$1");
+        }
+    }
+
+    private void assignRealmRole(String keycloakUserId, String roleName) {
+        try {
+            RealmResource realmResource = keycloakAdmin.realm(realm);
+            RoleRepresentation role = realmResource.roles().get(roleName).toRepresentation();
+            realmResource.users().get(keycloakUserId).roles().realmLevel().add(List.of(role));
+        } catch (Exception e) {
+            // The account is already usable; an admin can grant roles again from the Users screen.
+            log.error("Failed to assign {} to {}", roleName, keycloakUserId, e);
+        }
+    }
 
     public List<ClientResponse> getAllClients() {
         return clientRepository.findAll().stream()
@@ -332,7 +438,8 @@ public class AdminService {
                 .contactFirstName(client.getContactFirstName())
                 .contactLastName(client.getContactLastName())
                 .contactEmail(client.getEmail())
-                .contactPhone(client.getPhone())
+                .contactPhone(client.getContactPhone())
+                .phoneNumber(client.getPhone())
                 .country(client.getCountry())
                 .address(client.getAddress())
                 .taxId(client.getTaxId())

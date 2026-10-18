@@ -45,6 +45,17 @@ public class User {
     @Column(nullable = false)
     private Boolean enabled = true;
 
+    /**
+     * True for vendors an administrator created with a temporary password: they must set a new
+     * password at first sign-in before the rest of the portal unlocks. Cleared by
+     * `PUT /api/account/password`.
+     */
+    // `default false` matters: ddl-auto=update adds this column to a table that already has
+    // rows, and Postgres refuses a NOT NULL column without a default in that case.
+    @Column(name = "must_change_password", columnDefinition = "boolean not null default false")
+    @Builder.Default
+    private Boolean mustChangePassword = false;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "client_id")
     private Client client;

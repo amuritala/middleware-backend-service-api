@@ -2,6 +2,7 @@ package com.banking.api.service;
 
 import com.banking.api.dto.ChangePasswordRequest;
 import com.banking.api.exception.ApiException;
+import com.banking.api.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.keycloak.admin.client.Keycloak;
@@ -39,6 +40,7 @@ public class AccountService {
 
     private final Keycloak keycloakAdmin;
     private final RestTemplate restTemplate;
+    private final UserRepository userRepository;
 
     @Value("${keycloak.auth-server-url}")
     private String authServerUrl;
@@ -64,9 +66,32 @@ public class AccountService {
 
         verifyCurrentPassword(username, request.currentPassword());
         resetPassword(userId, request.newPassword());
+        clearMustChangePassword(userId);
 
         log.info("User {} changed their password", username);
         return ResponseEntity.ok(Map.of("message", "Password updated successfully"));
+    }
+
+    /**
+     * Whether the signed-in user still holds the temporary password an administrator gave them.
+     * The frontend gates the portal on this flag: while it is true the vendor is sent to the
+     * change-password screen and nowhere else. Users with no local row are never blocked.
+     */
+    public Map<String, Boolean> getCredentials(Jwt jwt) {
+        boolean mustChange = userRepository.findByKeycloakUserId(jwt.getSubject())
+                .map(user -> Boolean.TRUE.equals(user.getMustChangePassword()))
+                .orElse(false);
+        return Map.of("mustChangePassword", mustChange);
+    }
+
+    /** The forced change is satisfied exactly once - a successful change always clears it. */
+    private void clearMustChangePassword(String userId) {
+        userRepository.findByKeycloakUserId(userId).ifPresent(user -> {
+            if (Boolean.TRUE.equals(user.getMustChangePassword())) {
+                user.setMustChangePassword(false);
+                userRepository.save(user);
+            }
+        });
     }
 
     private void verifyCurrentPassword(String username, String currentPassword) {

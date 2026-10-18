@@ -2,6 +2,7 @@ package com.banking.api.controller;
 
 import com.banking.api.dto.ApproveClientRequest;
 import com.banking.api.dto.ClientResponse;
+import com.banking.api.dto.RegisterRequest;
 import com.banking.api.dto.AdminUserResponse;
 import com.banking.api.dto.UpdateUserRequest;
 import com.banking.api.dto.UserRolesRequest;
@@ -12,6 +13,7 @@ import com.banking.api.dto.DownstreamAuditResponse;
 import com.banking.api.service.DownstreamAuditService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -43,6 +45,43 @@ public class AdminController {
 
     private final AdminService adminService;
     private final DownstreamAuditService downstreamAuditService;
+
+    @Operation(
+            summary = "Create a vendor account directly",
+            description = "Creates the Keycloak user with the supplied temporary password and activates the client "
+                    + "immediately - admin-created vendors never pass through the PENDING review queue. The local "
+                    + "user is flagged so the vendor must change the temporary password at first sign-in. "
+                    + "ROLE_CLIENT is assigned automatically; grant service roles afterwards through the user "
+                    + "management endpoints.",
+            tags = "Admin - Clients"
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "201",
+                    description = "Client created and already active",
+                    content = @Content(schema = @Schema(implementation = ClientResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Validation failed - `details` maps each field name to its message",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "Caller does not hold ROLE_ADMIN",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "409",
+                    description = "A user with this email address already exists",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))
+            )
+    })
+    @PostMapping("/clients")
+    public ResponseEntity<ClientResponse> createClient(@Valid @RequestBody RegisterRequest request) {
+        log.info("Admin creating client: {}", request.getCompanyName());
+        return ResponseEntity.status(HttpStatus.CREATED).body(adminService.createClient(request));
+    }
 
     @Operation(
             summary = "List all clients",
