@@ -97,13 +97,60 @@ public class CustomerManagementService {
 
     @Transactional
     public RoleChangeApplicationResponse approveApplication(UUID applicationId, String reviewer) {
+        return approveApplication(applicationId, reviewer, null);
+    }
+
+    /**
+     * Approve an application, optionally granting only part of what was asked for. A null
+     * (or absent) subset grants every requested role - the original all-or-nothing behaviour.
+     * The subset must be non-empty and must not contain roles the vendor never requested;
+     * anything left out is simply never granted.
+     */
+    @Transactional
+    public RoleChangeApplicationResponse approveApplication(
+            UUID applicationId,
+            String reviewer,
+            Set<String> approvedRoles
+    ) {
         RoleChangeApplication application = findApplication(applicationId);
         ensurePending(application);
 
+        Set<String> rolesToGrant = resolveApprovedRoles(application, approvedRoles);
+
         User user = findUser(application.getKeycloakUserId());
-        replaceKeycloakRoles(application.getKeycloakUserId(), application.getRequestedRoles());
+        replaceKeycloakRoles(application.getKeycloakUserId(), rolesToGrant);
         application.approve(reviewer);
         return toResponse(applicationRepository.save(application), user);
+    }
+
+    /** Narrow the requested role set to what the reviewer agreed to grant. */
+    private Set<String> resolveApprovedRoles(
+            RoleChangeApplication application,
+            Set<String> approvedRoles
+    ) {
+        Set<String> requested = application.getRequestedRoles();
+        if (approvedRoles == null) {
+            return requested;
+        }
+
+        Set<String> normalized = approvedRoles.stream()
+                .filter(role -> role != null && !role.isBlank())
+                .map(String::trim)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException("At least one service must be approved - reject the request instead");
+        }
+
+        Set<String> neverRequested = normalized.stream()
+                .filter(role -> !requested.contains(role))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (!neverRequested.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Only roles the vendor requested can be approved: " + neverRequested
+            );
+        }
+        return normalized;
     }
 
     @Transactional

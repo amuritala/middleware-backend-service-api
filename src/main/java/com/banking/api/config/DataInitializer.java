@@ -1,5 +1,6 @@
 package com.banking.api.config;
 
+import com.banking.api.entity.AdminRole;
 import com.banking.api.entity.Client;
 import com.banking.api.entity.ClientStatus;
 import com.banking.api.entity.Role;
@@ -56,6 +57,8 @@ public class DataInitializer implements CommandLineRunner {
                 .firstName("System")
                 .lastName("Administrator")
                 .role(Role.ROLE_ADMIN)
+                // The seed account is the bootstrap Super Admin for the maker-checker rollout.
+                .adminRole(AdminRole.SUPER_ADMIN)
                 .enabled(true)
                 .client(savedClient)
                 .build();

@@ -39,6 +39,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(errorResponse);
     }
 
+    /** Authenticated, but the caller's governance role does not allow the operation. */
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDenied(
+            org.springframework.security.access.AccessDeniedException ex) {
+        log.warn("Access denied: {}", ex.getMessage());
+        return buildErrorResponse(HttpStatus.FORBIDDEN, "Access Denied",
+                "Your governance role does not allow this action");
+    }
+
     /** Something the caller referred to does not exist. */
     @ExceptionHandler(EntityNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleEntityNotFound(EntityNotFoundException ex) {

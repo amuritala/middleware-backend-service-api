@@ -1,5 +1,6 @@
 package com.banking.api.config;
 
+import com.banking.api.repository.UserRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -9,6 +10,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -27,6 +29,12 @@ import java.util.List;
 @EnableWebSecurity
 @EnableMethodSecurity
 public class SecurityConfig {
+
+    private final UserRepository userRepository;
+
+    public SecurityConfig(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
 
     /** Login, refresh and logout run without a valid access token, so no resource-server filter. */
     @Bean
@@ -80,6 +88,13 @@ public class SecurityConfig {
                         oauth2.jwt(jwt ->
                                 jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())
                         )
+                )
+
+                // After the bearer token is resolved: suspended and time-locked accounts
+                // lose API access here, tokens they already hold included.
+                .addFilterAfter(
+                        new UserAccessStateFilter(userRepository),
+                        BearerTokenAuthenticationFilter.class
                 );
 
         return http.build();

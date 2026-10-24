@@ -1,18 +1,24 @@
 package com.banking.api.service;
 
+import com.banking.api.dto.AdminMeResponse;
+import com.banking.api.dto.AdminUserSummaryResponse;
 import com.banking.api.dto.ClientResponse;
-import com.banking.api.dto.CreateBankUserRequest;
+import com.banking.api.dto.InitiateAdminUserRequest;
 import com.banking.api.dto.RegisterRequest;
+import com.banking.api.entity.AdminRole;
 import com.banking.api.entity.ApiKey;
 import com.banking.api.entity.Client;
 import com.banking.api.entity.ClientStatus;
 import com.banking.api.entity.Role;
 import com.banking.api.entity.User;
+import com.banking.api.entity.ApprovalStatus;
 import com.banking.api.exception.ApiException;
 import com.banking.api.repository.ApiKeyRepository;
+import com.banking.api.repository.ApprovalRequestRepository;
 import com.banking.api.repository.ClientRepository;
 import com.banking.api.repository.UserRepository;
 import com.banking.api.util.ApiKeyGenerator;
+import com.banking.api.util.TemporaryPasswordGenerator;
 import lombok.RequiredArgsConstructor;
 
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Value;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -36,12 +43,20 @@ import com.banking.api.dto.UpdateUserRequest;
 import com.banking.api.dto.UserRolesRequest;
 import jakarta.persistence.EntityNotFoundException;
 
+/**
+ * Vendor and staff account operations. Administrator-created accounts no longer go live on
+ * the spot: {@code provisionClientPending} / {@code provisionBankUserPending} build a disabled
+ * account behind a maker-checker request, and the {@code complete*} methods only run once an
+ * authorizer has signed the request off. The temporary password is generated at completion
+ * time, emailed, and never returned through the API.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class AdminService {
 
     private final ClientRepository clientRepository;
+    private final ApprovalRequestRepository approvalRequestRepository;
     private final ApiKeyRepository apiKeyRepository;
     private final UserRepository userRepository;
     private final Keycloak keycloakAdmin;
@@ -50,16 +65,16 @@ public class AdminService {
     @Value("${keycloak.realm}")
     private String realm;
 
-    // === Client Management ===
+    // === Vendor registration (maker-checker step 1: propose) ===
 
     /**
-     * Creates a vendor that is live immediately. Self-registrations land in PENDING and wait
-     * for review; an administrator-created account never enters that queue, because the admin
-     * has already vouched for it. The supplied password is only a temporary credential - the
-     * local user row is flagged so the vendor must set their own password at first sign-in.
+     * Stages a vendor account for an initiated registration. The Keycloak user exists but is
+     * disabled and the local client sits in PENDING, so nothing can sign in and no service
+     * will accept the vendor until an authorizer completes the request. The Keycloak user is
+     * created here so a duplicate email is caught at initiation rather than at approval.
      */
     @Transactional
-    public ClientResponse createClient(RegisterRequest request) {
+    public Client provisionClientPending(RegisterRequest request) {
         if (userRepository.existsByUsername(request.getContactEmail())) {
             throw new ApiException(
                     "EMAIL_ALREADY_REGISTERED",
@@ -68,10 +83,8 @@ public class AdminService {
             );
         }
 
-        // 1. Keycloak user, enabled, carrying the temporary password.
-        String keycloakUserId = createKeycloakUser(request);
+        String keycloakUserId = createKeycloakUser(request, false);
 
-        // 2. Local client record, active from the moment it is created.
         Client client = Client.builder()
                 .companyName(request.getCompanyName())
                 .registrationNumber(request.getRegistrationNumber())
@@ -85,45 +98,85 @@ public class AdminService {
                 .taxId(request.getTaxId())
                 .industry(request.getIndustry())
                 .keycloakUserId(keycloakUserId)
-                .status(ClientStatus.ACTIVE)
+                .status(ClientStatus.PENDING)
                 .build();
         Client savedClient = clientRepository.save(client);
 
-        // 3. Local user row, flagged for the forced password change at first sign-in.
-        User user = User.builder()
+        userRepository.save(User.builder()
                 .keycloakUserId(keycloakUserId)
                 .username(request.getContactEmail())
                 .email(request.getContactEmail())
                 .firstName(request.getContactFirstName())
                 .lastName(request.getContactLastName())
                 .role(Role.ROLE_CLIENT)
-                .enabled(true)
+                .enabled(false)
                 .mustChangePassword(true)
                 .client(savedClient)
-                .build();
-        userRepository.save(user);
+                .build());
 
-        // 4. Realm role, so the vendor portal accepts them the moment they sign in.
-        assignRealmRole(keycloakUserId, "ROLE_CLIENT");
+        log.info("Vendor {} staged as PENDING (Keycloak user disabled)", savedClient.getCompanyName());
+        return savedClient;
+    }
 
-        log.info("Admin-created client {} is ACTIVE (temporary password for {})",
-                savedClient.getCompanyName(), request.getContactEmail());
-        // 5. Email the temporary password. A mail failure must not undo the account.
-        boolean emailSent = welcomeEmailService.sendTemporaryPassword(
-                request.getContactEmail(), request.getContactFirstName(), request.getPassword());
+    /**
+     * Maker-checker step 2: the authorizer approved, so the vendor goes live. A fresh
+     * temporary password is generated here - never stored, only emailed - the Keycloak user
+     * is enabled with ROLE_CLIENT, and the client moves PENDING -> APPROVED -> ACTIVE.
+     */
+    @Transactional
+    public ClientResponse completeClientApproval(UUID clientId) {
+        Client client = clientRepository.findById(clientId)
+                .orElseThrow(() -> new EntityNotFoundException("Client not found"));
+
+        client.approve();
+        client.activate();
+        Client savedClient = clientRepository.save(client);
+
+        boolean emailSent = false;
+        if (client.getKeycloakUserId() != null) {
+            String temporaryPassword = TemporaryPasswordGenerator.generate();
+            resetKeycloakPassword(client.getKeycloakUserId(), temporaryPassword);
+            enableKeycloakUser(client.getKeycloakUserId(), List.of("ROLE_CLIENT"));
+            userRepository.findByKeycloakUserId(client.getKeycloakUserId()).ifPresent(user -> {
+                user.setEnabled(true);
+                user.setMustChangePassword(true);
+                userRepository.save(user);
+            });
+            emailSent = welcomeEmailService.sendTemporaryPassword(
+                    client.getEmail(), client.getContactFirstName(), temporaryPassword);
+        }
+
+        log.info("Client {} approved and activated (temporary password emailed: {})",
+                savedClient.getCompanyName(), emailSent);
 
         ClientResponse response = toClientResponse(savedClient);
         response.setWelcomeEmailSent(emailSent);
         return response;
     }
 
+    /** The authorizer refused the registration: the vendor stays disabled and is marked rejected. */
+    @Transactional
+    public Client completeClientRejection(UUID clientId) {
+        Client client = clientRepository.findById(clientId)
+                .orElseThrow(() -> new EntityNotFoundException("Client not found"));
+        client.reject();
+        Client savedClient = clientRepository.save(client);
+        // The Keycloak user was never enabled; it stays that way.
+        log.info("Client {} rejected at the authorization step", savedClient.getCompanyName());
+        return savedClient;
+    }
+
+    // === Staff accounts (maker-checker step 1: propose) ===
+
     /**
-     * Creates a bank user (staff administrator): ROLE_ADMIN, no client company, and flagged so
-     * the temporary password must be replaced at first sign-in.
+     * Stages a bank staff administrator. The account carries its governance role from the
+     * start but stays disabled until an authorizer approves; the temporary password is
+     * generated and emailed at that point.
      */
     @Transactional
-    public AdminUserResponse createBankUser(CreateBankUserRequest request) {
-        if (userRepository.existsByUsername(request.getEmail())) {
+    public User provisionBankUserPending(InitiateAdminUserRequest request) {
+        if (userRepository.existsByUsername(request.getEmail())
+                || userRepository.existsByEmail(request.getEmail())) {
             throw new ApiException(
                     "EMAIL_ALREADY_REGISTERED",
                     "A user with this email address already exists",
@@ -135,71 +188,124 @@ public class AdminService {
                 .contactEmail(request.getEmail())
                 .contactFirstName(request.getFirstName())
                 .contactLastName(request.getLastName())
-                .password(request.getPassword())
                 .build();
-        String keycloakUserId = createKeycloakUser(credentials);
+        String keycloakUserId = createKeycloakUser(credentials, false);
 
-        userRepository.save(User.builder()
+        User user = userRepository.save(User.builder()
                 .keycloakUserId(keycloakUserId)
                 .username(request.getEmail())
                 .email(request.getEmail())
                 .firstName(request.getFirstName())
                 .lastName(request.getLastName())
                 .role(Role.ROLE_ADMIN)
-                .enabled(true)
+                .adminRole(request.getAdminRole())
+                .enabled(false)
                 .mustChangePassword(true)
                 .build());
 
-        assignRealmRole(keycloakUserId, "ROLE_ADMIN");
-        log.info("Admin-created bank user {} with ROLE_ADMIN", request.getEmail());
-
-        welcomeEmailService.sendTemporaryPassword(
-                request.getEmail(), request.getFirstName(), request.getPassword());
-
-        return toAdminUserResponse(keycloakUser(keycloakUserId).toRepresentation());
+        log.info("Bank user {} staged as PENDING with {} (Keycloak user disabled)",
+                request.getEmail(), request.getAdminRole());
+        return user;
     }
 
-    private String createKeycloakUser(RegisterRequest request) {
-        UserRepresentation user = new UserRepresentation();
-        user.setUsername(request.getContactEmail());
-        user.setEmail(request.getContactEmail());
-        user.setFirstName(request.getContactFirstName());
-        user.setLastName(request.getContactLastName());
+    /**
+     * Maker-checker step 2 for staff: enable the account, hand it a freshly generated
+     * temporary password by email, and flag it so the first sign-in forces a change.
+     */
+    @Transactional
+    public AdminUserSummaryResponse completeBankUserApproval(UUID localUserId) {
+        User user = userRepository.findById(localUserId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found"));
+
+        String temporaryPassword = TemporaryPasswordGenerator.generate();
+        resetKeycloakPassword(user.getKeycloakUserId(), temporaryPassword);
+        enableKeycloakUser(user.getKeycloakUserId(), List.of("ROLE_ADMIN"));
+
         user.setEnabled(true);
-        // An administrator supplied these details, so the address counts as verified.
-        user.setEmailVerified(true);
+        user.setMustChangePassword(true);
+        User saved = userRepository.save(user);
 
-        CredentialRepresentation credential = new CredentialRepresentation();
-        credential.setType(CredentialRepresentation.PASSWORD);
-        credential.setValue(request.getPassword());
-        credential.setTemporary(false);
-        user.setCredentials(List.of(credential));
+        boolean emailSent = welcomeEmailService.sendTemporaryPassword(
+                saved.getEmail(), saved.getFirstName(), temporaryPassword);
+        log.info("Bank user {} approved and activated (temporary password emailed: {})",
+                saved.getEmail(), emailSent);
 
-        try (var response = keycloakAdmin.realm(realm).users().create(user)) {
-            if (response.getStatus() == 409) {
-                throw new ApiException(
-                        "EMAIL_ALREADY_REGISTERED",
-                        "A user with this email address already exists",
-                        HttpStatus.CONFLICT
-                );
-            }
-            if (response.getStatus() != 201) {
-                throw new RuntimeException("Failed to create Keycloak user");
-            }
-            return response.getLocation().getPath().replaceAll(".*/([^/]+)$", "$1");
-        }
+        return toStaffSummary(saved);
     }
 
-    private void assignRealmRole(String keycloakUserId, String roleName) {
-        try {
-            RealmResource realmResource = keycloakAdmin.realm(realm);
-            RoleRepresentation role = realmResource.roles().get(roleName).toRepresentation();
-            realmResource.users().get(keycloakUserId).roles().realmLevel().add(List.of(role));
-        } catch (Exception e) {
-            // The account is already usable; an admin can grant roles again from the Users screen.
-            log.error("Failed to assign {} to {}", roleName, keycloakUserId, e);
-        }
+    /** The authorizer refused the staff account; it stays disabled and unusable. */
+    @Transactional
+    public void completeBankUserRejection(UUID localUserId) {
+        userRepository.findById(localUserId).ifPresent(user -> {
+            user.setEnabled(false);
+            userRepository.save(user);
+            if (user.getKeycloakUserId() != null) {
+                disableKeycloakUser(user.getKeycloakUserId());
+            }
+            log.info("Bank user {} rejected at the authorization step", user.getEmail());
+        });
     }
+
+    // === Service-role assignment (executed on approval) ===
+
+    /** Grants or revokes service roles on a user once an authorizer approved the request. */
+    @Transactional
+    public void applyServiceRoles(String keycloakUserId, List<String> roles, String mode) {
+        UserResource userResource = keycloakUser(keycloakUserId);
+        List<RoleRepresentation> resolved = resolveServiceRoles(roles);
+        if ("REVOKE".equalsIgnoreCase(mode)) {
+            userResource.roles().realmLevel().remove(resolved);
+        } else {
+            userResource.roles().realmLevel().add(resolved);
+        }
+        log.info("Service roles {} {} for user {}", roles, mode, keycloakUserId);
+    }
+
+    // === Governance role assignment (executed on approval) ===
+
+    /** Sets the governance role of a staff account once an authorizer approved the request. */
+    @Transactional
+    public AdminUserSummaryResponse applyAdminRole(UUID localUserId, AdminRole adminRole) {
+        User user = userRepository.findById(localUserId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found"));
+        user.setAdminRole(adminRole);
+        User saved = userRepository.save(user);
+        log.info("Governance role of {} set to {}", saved.getEmail(), adminRole);
+        return toStaffSummary(saved);
+    }
+
+    // === Staff directory / governance profile ===
+
+    /** Every bank staff administrator, with the governance role that decides their access. */
+    public List<AdminUserSummaryResponse> getStaffUsers() {
+        return userRepository.findStaffByRole(Role.ROLE_ADMIN).stream()
+                .map(this::toStaffSummary)
+                .collect(Collectors.toList());
+    }
+
+    /** The signed-in administrator as the governance layer sees them. */
+    public AdminMeResponse getMe(String keycloakUserId) {
+        User user = userRepository.findByKeycloakUserId(keycloakUserId)
+                .orElseThrow(() -> new ApiException(
+                        "GOVERNANCE_ROLE_REQUIRED",
+                        "No local account exists for this session",
+                        HttpStatus.FORBIDDEN
+                ));
+        String fullName = ((user.getFirstName() == null ? "" : user.getFirstName()) + " "
+                + (user.getLastName() == null ? "" : user.getLastName())).trim();
+        return new AdminMeResponse(
+                user.getKeycloakUserId(),
+                user.getFirstName(),
+                user.getLastName(),
+                fullName,
+                user.getEmail(),
+                user.getAdminRole(),
+                Boolean.TRUE.equals(user.getMustChangePassword()),
+                user.getAdminRole() != null ? user.getAdminRole().getPermissions() : List.of()
+        );
+    }
+
+    // === Client Management ===
 
     public List<ClientResponse> getAllClients() {
         return clientRepository.findAll().stream()
@@ -219,6 +325,11 @@ public class AdminService {
         return toClientResponse(client);
     }
 
+    /**
+     * Reviews a self-registered vendor - the queue a vendor enters by signing up themselves,
+     * which is separate from the maker-checker flow used for administrator-initiated
+     * registrations.
+     */
     @Transactional
     public ClientResponse approveClient(UUID clientId, List<String> approvedRoles) {
         Client client = clientRepository.findById(clientId)
@@ -227,6 +338,7 @@ public class AdminService {
         if (client.getStatus() != ClientStatus.PENDING) {
             throw new IllegalStateException("Client is not in pending state");
         }
+        refuseWhenQueuedForAuthorization(clientId);
 
         approvedRoles.add("ROLE_CLIENT");
 
@@ -250,6 +362,7 @@ public class AdminService {
         if (client.getStatus() != ClientStatus.PENDING) {
             throw new IllegalStateException("Client is not in pending state");
         }
+        refuseWhenQueuedForAuthorization(clientId);
 
         client.reject();
         Client savedClient = clientRepository.save(client);
@@ -305,6 +418,25 @@ public class AdminService {
         return toClientResponse(savedClient);
     }
 
+    /**
+     * An administrator-initiated registration also lives in the approvals queue, so its
+     * decision has to be made there - approving through the self-registration shortcut
+     * would leave the queued request pending forever and skip the audit trail.
+     */
+    private void refuseWhenQueuedForAuthorization(UUID clientId) {
+        boolean queued = approvalRequestRepository
+                .findByStatusOrderByCreatedAtDesc(ApprovalStatus.PENDING)
+                .stream()
+                .anyMatch(request -> clientId.toString().equals(request.getTargetId()));
+        if (queued) {
+            throw new ApiException(
+                    "APPROVAL_QUEUE",
+                    "This registration is awaiting authorization - decide it from the approvals queue",
+                    HttpStatus.CONFLICT
+            );
+        }
+    }
+
     // === API Key Management ===
     @Transactional
     public void revokeApiKey(UUID keyId) {
@@ -354,6 +486,15 @@ public class AdminService {
         return toAdminUserResponse(keycloakUser(userId).toRepresentation());
     }
 
+    /** Same lookup, but a missing user is a null rather than an exception. */
+    public AdminUserResponse getKeycloakUserOrNull(String userId) {
+        try {
+            return toAdminUserResponse(keycloakUser(userId).toRepresentation());
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
     @Transactional
     public AdminUserResponse updateKeycloakUser(String userId, UpdateUserRequest request) {
         UserResource userResource = keycloakUser(userId);
@@ -387,6 +528,59 @@ public class AdminService {
 
     // === Keycloak Helpers ===
 
+    private String createKeycloakUser(RegisterRequest request, boolean enabled) {
+        UserRepresentation user = new UserRepresentation();
+        user.setUsername(request.getContactEmail());
+        user.setEmail(request.getContactEmail());
+        user.setFirstName(request.getContactFirstName());
+        user.setLastName(request.getContactLastName());
+        user.setEnabled(enabled);
+        // An administrator supplied these details, so the address counts as verified.
+        user.setEmailVerified(true);
+
+        // The real credential only exists once the account is activated - it is generated
+        // and emailed at approval time. This placeholder never leaves the server.
+        CredentialRepresentation credential = new CredentialRepresentation();
+        credential.setType(CredentialRepresentation.PASSWORD);
+        credential.setValue(TemporaryPasswordGenerator.generate());
+        credential.setTemporary(false);
+        user.setCredentials(List.of(credential));
+
+        try (var response = keycloakAdmin.realm(realm).users().create(user)) {
+            if (response.getStatus() == 409) {
+                throw new ApiException(
+                        "EMAIL_ALREADY_REGISTERED",
+                        "A user with this email address already exists",
+                        HttpStatus.CONFLICT
+                );
+            }
+            if (response.getStatus() != 201) {
+                throw new RuntimeException("Failed to create Keycloak user");
+            }
+            return response.getLocation().getPath().replaceAll(".*/([^/]+)$", "$1");
+        }
+    }
+
+    /** Overwrites the credential with a freshly generated temporary password. */
+    private void resetKeycloakPassword(String keycloakUserId, String password) {
+        CredentialRepresentation credential = new CredentialRepresentation();
+        credential.setType(CredentialRepresentation.PASSWORD);
+        credential.setValue(password);
+        credential.setTemporary(false);
+        keycloakAdmin.realm(realm).users().get(keycloakUserId).resetPassword(credential);
+    }
+
+    private void assignRealmRole(String keycloakUserId, String roleName) {
+        try {
+            RealmResource realmResource = keycloakAdmin.realm(realm);
+            RoleRepresentation role = realmResource.roles().get(roleName).toRepresentation();
+            realmResource.users().get(keycloakUserId).roles().realmLevel().add(List.of(role));
+        } catch (Exception e) {
+            // The account is already usable; an admin can grant roles again from the Users screen.
+            log.error("Failed to assign {} to {}", roleName, keycloakUserId, e);
+        }
+    }
+
     private void enableKeycloakUser( String userId, List<String> approvedRoles ) {
         try { RealmResource realmResource = keycloakAdmin.realm(realm);
         UserResource userResource = realmResource.users().get(userId); // Enable the user
@@ -413,6 +607,94 @@ public class AdminService {
         } catch (Exception e) {
             log.error("Failed to disable Keycloak user: {}", e.getMessage());
         }
+    }
+
+    private void enableKeycloakUser(String userId) {
+        try {
+            RealmResource realmResource = keycloakAdmin.realm(realm);
+            UserResource userResource = realmResource.users().get(userId);
+            UserRepresentation user = userResource.toRepresentation();
+            user.setEnabled(true);
+            userResource.update(user);
+        } catch (Exception e) {
+            log.error("Failed to enable Keycloak user: {}", e.getMessage());
+        }
+    }
+
+    // === Suspend / reinstate / time-lock (executed on approval) ===
+
+    /**
+     * Suspension blocks sign-in outright: the Keycloak user is disabled, so the password
+     * grant itself fails, and the local flag makes every already-issued token refuse at the
+     * API. Only an approved reinstatement reverses it.
+     */
+    @Transactional
+    public void suspendUser(String keycloakUserId) {
+        User user = requireLocalUser(keycloakUserId);
+        user.setSuspended(true);
+        // Suspension is indefinite - any pending time lock is superseded by it.
+        user.setLockedUntil(null);
+        userRepository.save(user);
+        disableKeycloakUser(user.getKeycloakUserId());
+        log.info("User {} suspended", user.getEmail());
+    }
+
+    /** Lifts a suspension. A lock still in force keeps the Keycloak account disabled. */
+    @Transactional
+    public void unsuspendUser(String keycloakUserId) {
+        User user = requireLocalUser(keycloakUserId);
+        user.setSuspended(false);
+        boolean locked = user.getLockedUntil() != null
+                && user.getLockedUntil().isAfter(LocalDateTime.now());
+        if (!locked) {
+            user.setLockedUntil(null);
+            if (Boolean.TRUE.equals(user.getEnabled())) {
+                enableKeycloakUser(user.getKeycloakUserId());
+            }
+        }
+        userRepository.save(user);
+        log.info("User {} reinstated{}", user.getEmail(), locked ? " (time lock still in force)" : "");
+    }
+
+    /**
+     * A time lock disables the Keycloak user until the requested minutes pass; the scheduled
+     * release job clears it again. Access is refused from the moment of approval, both at
+     * login (Keycloak) and at the API (the access-state filter).
+     */
+    @Transactional
+    public void lockUser(String keycloakUserId, int minutes) {
+        User user = requireLocalUser(keycloakUserId);
+        user.setLockedUntil(LocalDateTime.now().plusMinutes(minutes));
+        userRepository.save(user);
+        disableKeycloakUser(user.getKeycloakUserId());
+        log.info("User {} locked for {} minutes", user.getEmail(), minutes);
+    }
+
+    /**
+     * Releases every lock whose expiry has passed and re-enables those accounts in Keycloak.
+     * Runs on a fixed schedule and on demand, so a lock never outlives its window even if the
+     * application restarted while it was in force. Suspended accounts stay disabled - their
+     * block is indefinite and only an approved reinstatement lifts it.
+     */
+    @Transactional
+    public int releaseExpiredLocks() {
+        List<User> expired = userRepository.findExpiredLocks(LocalDateTime.now());
+        for (User user : expired) {
+            user.setLockedUntil(null);
+            if (!Boolean.TRUE.equals(user.getSuspended())
+                    && Boolean.TRUE.equals(user.getEnabled())) {
+                enableKeycloakUser(user.getKeycloakUserId());
+            }
+            userRepository.save(user);
+            log.info("Time lock expired for {}", user.getEmail());
+        }
+        return expired.size();
+    }
+
+    private User requireLocalUser(String keycloakUserId) {
+        return userRepository.findByKeycloakUserId(keycloakUserId)
+                .orElseThrow(() -> new ApiException(
+                        "TARGET_NOT_FOUND", "No user exists with that id", HttpStatus.NOT_FOUND));
     }
 
     private UserResource keycloakUser(String userId) {
@@ -477,9 +759,28 @@ public class AdminService {
                     roles,
                     roles.contains("ROLE_ADMIN") ? "BANK_USER" : "CLIENT"
             );
-    }
+        }
 
     // === Mappers ===
+
+    private AdminUserSummaryResponse toStaffSummary(User user) {
+        String fullName = ((user.getFirstName() == null ? "" : user.getFirstName()) + " "
+                + (user.getLastName() == null ? "" : user.getLastName())).trim();
+        return new AdminUserSummaryResponse(
+                user.getKeycloakUserId(),
+                user.getFirstName(),
+                user.getLastName(),
+                fullName,
+                user.getEmail(),
+                user.getAdminRole(),
+                Boolean.TRUE.equals(user.getEnabled()),
+                Boolean.TRUE.equals(user.getMustChangePassword()),
+                Boolean.TRUE.equals(user.getSuspended()),
+                user.getLockedUntil(),
+                user.getLastLogin(),
+                user.getCreatedAt()
+        );
+    }
 
     private ClientResponse toClientResponse(Client client) {
         return ClientResponse.builder()

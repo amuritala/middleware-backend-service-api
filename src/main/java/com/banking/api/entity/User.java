@@ -42,6 +42,15 @@ public class User {
     @Column(nullable = false)
     private Role role;
 
+    /**
+     * Bank staff only: the governance role deciding what this administrator may do inside
+     * the admin portal - who may initiate, who may authorize, who assigns roles. Null for
+     * vendor users and for staff who have not been classified yet.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "admin_role")
+    private AdminRole adminRole;
+
     @Column(nullable = false)
     private Boolean enabled = true;
 
@@ -55,6 +64,23 @@ public class User {
     @Column(name = "must_change_password", columnDefinition = "boolean not null default false")
     @Builder.Default
     private Boolean mustChangePassword = false;
+
+    /**
+     * Suspended by an approved maker-checker request: the account cannot sign in and every
+     * API call from its token is refused until an approved reinstatement clears this flag.
+     * Deliberately separate from `enabled`, which tracks the account-provisioning state.
+     */
+    @Column(name = "suspended", columnDefinition = "boolean not null default false")
+    @Builder.Default
+    private Boolean suspended = false;
+
+    /**
+     * When an approved time-lock expires. Until then the account cannot sign in or call the
+     * API; a scheduled job clears the stamp and re-enables the Keycloak user at expiry.
+     * Null means no lock is in force.
+     */
+    @Column(name = "locked_until")
+    private LocalDateTime lockedUntil;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "client_id")

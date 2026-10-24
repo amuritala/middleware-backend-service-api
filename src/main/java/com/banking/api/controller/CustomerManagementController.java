@@ -1,5 +1,6 @@
 package com.banking.api.controller;
 
+import com.banking.api.dto.ApproveRoleApplicationRequest;
 import com.banking.api.dto.RoleChangeApplicationRequest;
 import com.banking.api.dto.RoleChangeApplicationResponse;
 import com.banking.api.exception.ErrorResponse;
@@ -158,7 +159,9 @@ public class CustomerManagementController {
     @Operation(
             summary = "Approve a role-change application",
             description = "Applies the requested roles to the vendor in Keycloak and marks the application APPROVED, "
-                    + "recording the reviewing administrator.",
+                    + "recording the reviewing administrator. Send an optional body with `approvedRoles` to grant "
+                    + "only part of the request - every role left out is never granted. With no body, every "
+                    + "requested role is granted.",
             tags = "Customer - Role Applications"
     )
     @ApiResponses({
@@ -184,14 +187,21 @@ public class CustomerManagementController {
             )
     })
     @PutMapping("/role-applications/{applicationId}/approve")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("@adminGuard.canAuthorize(authentication)")
     public ResponseEntity<RoleChangeApplicationResponse> approveApplication(
             Authentication authentication,
-            @Parameter(description = "Application identifier") @PathVariable UUID applicationId
+            @Parameter(description = "Application identifier") @PathVariable UUID applicationId,
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    description = "Optional subset of requested roles to grant. Omit to grant them all.",
+                    required = false,
+                    content = @Content(schema = @Schema(implementation = ApproveRoleApplicationRequest.class))
+            )
+            @RequestBody(required = false) ApproveRoleApplicationRequest request
     ) {
         return ResponseEntity.ok(customerManagementService.approveApplication(
                 applicationId,
-                subject(authentication)
+                subject(authentication),
+                request == null ? null : request.approvedRoles()
         ));
     }
 
@@ -223,7 +233,7 @@ public class CustomerManagementController {
             )
     })
     @PutMapping("/role-applications/{applicationId}/reject")
-    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PreAuthorize("@adminGuard.canAuthorize(authentication)")
     public ResponseEntity<RoleChangeApplicationResponse> rejectApplication(
             Authentication authentication,
             @Parameter(description = "Application identifier") @PathVariable UUID applicationId

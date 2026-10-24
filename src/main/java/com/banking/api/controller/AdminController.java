@@ -1,15 +1,21 @@
 package com.banking.api.controller;
 
 import com.banking.api.dto.ApproveClientRequest;
+import com.banking.api.dto.ApprovalRequestResponse;
 import com.banking.api.dto.ClientResponse;
-import com.banking.api.dto.CreateBankUserRequest;
-import com.banking.api.dto.RegisterRequest;
+import com.banking.api.dto.InitiateAdminUserRequest;
+import com.banking.api.dto.InitiateClientActionRequest;
+import com.banking.api.dto.InitiateServiceAssignmentRequest;
+import com.banking.api.dto.InitiateVendorRegistrationRequest;
+import com.banking.api.dto.AuditLogResponse;
 import com.banking.api.dto.AdminUserResponse;
 import com.banking.api.dto.UpdateUserRequest;
 import com.banking.api.dto.UserRolesRequest;
+import com.banking.api.entity.ApprovalActionType;
 import com.banking.api.entity.ClientStatus;
 import com.banking.api.exception.ErrorResponse;
 import com.banking.api.service.AdminService;
+import com.banking.api.service.ApprovalService;
 import com.banking.api.dto.DownstreamAuditResponse;
 import com.banking.api.service.DownstreamAuditService;
 import lombok.RequiredArgsConstructor;
@@ -45,22 +51,22 @@ import org.springframework.data.domain.Pageable;
 public class AdminController {
 
     private final AdminService adminService;
+    private final ApprovalService approvalService;
     private final DownstreamAuditService downstreamAuditService;
 
     @Operation(
-            summary = "Create a vendor account directly",
-            description = "Creates the Keycloak user with the supplied temporary password and activates the client "
-                    + "immediately - admin-created vendors never pass through the PENDING review queue. The local "
-                    + "user is flagged so the vendor must change the temporary password at first sign-in. "
-                    + "ROLE_CLIENT is assigned automatically; grant service roles afterwards through the user "
-                    + "management endpoints.",
+            summary = "Initiate a vendor registration (maker-checker step 1)",
+            description = "Stages a vendor: the Keycloak account is created disabled and the local client sits "
+                    + "in PENDING until an authorizer approves the request. On approval the vendor becomes "
+                    + "ACTIVE and a generated temporary password is emailed to the contact - no credential is "
+                    + "ever returned by the API. Requires the INITIATOR or SUPER_ADMIN governance role.",
             tags = "Admin - Clients"
     )
     @ApiResponses({
             @ApiResponse(
                     responseCode = "201",
-                    description = "Client created and already active",
-                    content = @Content(schema = @Schema(implementation = ClientResponse.class))
+                    description = "Registration staged as PENDING, awaiting authorization",
+                    content = @Content(schema = @Schema(implementation = ApprovalRequestResponse.class))
             ),
             @ApiResponse(
                     responseCode = "400",
@@ -78,22 +84,33 @@ public class AdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))
             )
     })
+    @PreAuthorize("@adminGuard.canInitiateVendorActions(authentication)")
     @PostMapping("/clients")
-    public ResponseEntity<ClientResponse> createClient(@Valid @RequestBody RegisterRequest request) {
-        log.info("Admin creating client: {}", request.getCompanyName());
-        return ResponseEntity.status(HttpStatus.CREATED).body(adminService.createClient(request));
+    public ResponseEntity<ApprovalRequestResponse> createClient(
+            @Valid @RequestBody InitiateVendorRegistrationRequest request,
+            Authentication authentication
+    ) {
+        log.info("Initiating vendor registration: {}", request.getCompanyName());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(approvalService.initiateVendorRegistration(authentication, request));
     }
 
     @Operation(
-            summary = "Create a bank user",
-            description = "Creates a staff administrator with ROLE_ADMIN and a temporary password that is "
-                    + "emailed to them and must be changed at first sign-in.",
+            summary = "Initiate an admin user creation (maker-checker step 1)",
+            description = "Stages a staff administrator with the requested governance role. The account stays "
+                    + "disabled until an authorizer approves it; only then is a generated temporary password "
+                    + "emailed, to be changed at first sign-in. Requires the CONTROL or SUPER_ADMIN role.",
             tags = "Admin - Users"
     )
+    @PreAuthorize("@adminGuard.canManageStaff(authentication)")
     @PostMapping("/users")
-    public ResponseEntity<AdminUserResponse> createBankUser(@Valid @RequestBody CreateBankUserRequest request) {
-        log.info("Admin creating bank user: {}", request.getEmail());
-        return ResponseEntity.status(HttpStatus.CREATED).body(adminService.createBankUser(request));
+    public ResponseEntity<ApprovalRequestResponse> createBankUser(
+            @Valid @RequestBody InitiateAdminUserRequest request,
+            Authentication authentication
+    ) {
+        log.info("Initiating bank user creation: {}", request.getEmail());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(approvalService.initiateAdminUserCreation(authentication, request));
     }
 
     @Operation(
@@ -227,10 +244,12 @@ public class AdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))
             )
     })
+    @PreAuthorize("@adminGuard.canAuthorize(authentication)")
     @PutMapping("/clients/{clientId}/approve")
     public ResponseEntity<ClientResponse> approveClient(
             @Parameter(description = "Client identifier") @PathVariable UUID clientId,
-            @RequestBody ApproveClientRequest request
+            @RequestBody ApproveClientRequest request,
+            Authentication authentication
     ) {
         log.info(
                 "Approving client: {} with roles: {}",
@@ -273,9 +292,11 @@ public class AdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))
             )
     })
+    @PreAuthorize("@adminGuard.canAuthorize(authentication)")
     @PutMapping("/clients/{clientId}/reject")
     public ResponseEntity<ClientResponse> rejectClient(
-            @Parameter(description = "Client identifier") @PathVariable UUID clientId
+            @Parameter(description = "Client identifier") @PathVariable UUID clientId,
+            Authentication authentication
     ) {
         log.info("Rejecting client: {}", clientId);
         return ResponseEntity.ok(adminService.rejectClient(clientId));
@@ -303,12 +324,18 @@ public class AdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))
             )
     })
+    @PreAuthorize("@adminGuard.canInitiateVendorActions(authentication)")
     @PutMapping("/clients/{clientId}/suspend")
-    public ResponseEntity<ClientResponse> suspendClient(
-            @Parameter(description = "Client identifier") @PathVariable UUID clientId
+    public ResponseEntity<ApprovalRequestResponse> suspendClient(
+            @Parameter(description = "Client identifier") @PathVariable UUID clientId,
+            @Valid @RequestBody InitiateClientActionRequest request,
+            Authentication authentication
     ) {
-        log.info("Suspending client: {}", clientId);
-        return ResponseEntity.ok(adminService.suspendClient(clientId));
+        request.setClientId(clientId);
+        log.info("Initiating suspension of client: {}", clientId);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(approvalService.initiateClientAction(
+                        authentication, ApprovalActionType.CLIENT_SUSPEND, request));
     }
 
     @Operation(
@@ -334,12 +361,17 @@ public class AdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))
             )
     })
+    @PreAuthorize("@adminGuard.canInitiateVendorActions(authentication)")
     @PutMapping("/clients/{clientId}/activate")
-    public ResponseEntity<ClientResponse> activateClient(
+    public ResponseEntity<ApprovalRequestResponse> activateClient(
             @Parameter(description = "Client identifier") @PathVariable UUID clientId,
-            @RequestBody ApproveClientRequest request) {
-        log.info("Activating client: {}", clientId);
-        return ResponseEntity.ok(adminService.activateClient(clientId, request.approvedRoles()));
+            @Valid @RequestBody InitiateClientActionRequest request,
+            Authentication authentication) {
+        request.setClientId(clientId);
+        log.info("Initiating activation of client: {}", clientId);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(approvalService.initiateClientAction(
+                        authentication, ApprovalActionType.CLIENT_ACTIVATE, request));
     }
 
     @Operation(
@@ -357,6 +389,7 @@ public class AdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))
             )
     })
+    @PreAuthorize("@adminGuard.canViewAudit(authentication)")
     @GetMapping("/downstream-audit")
     public ResponseEntity<Page<DownstreamAuditResponse>> getDownstreamAudit(
             @ParameterObject Pageable pageable
@@ -477,12 +510,21 @@ public class AdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))
             )
     })
+    @PreAuthorize("@adminGuard.canInitiateVendorActions(authentication)")
     @PutMapping("/users/{userId}/roles")
-    public ResponseEntity<AdminUserResponse> assignRoles(
+    public ResponseEntity<ApprovalRequestResponse> assignRoles(
             @Parameter(description = "Keycloak user id (the JWT `sub` claim)") @PathVariable String userId,
-            @Valid @RequestBody UserRolesRequest request
+            @Valid @RequestBody UserRolesRequest request,
+            Authentication authentication
     ) {
-        return ResponseEntity.ok(adminService.assignRoles(userId, request));
+        InitiateServiceAssignmentRequest initiation = InitiateServiceAssignmentRequest.builder()
+                .targetKeycloakUserId(userId)
+                .roles(request.roles())
+                .mode("GRANT")
+                .comment(request.comment())
+                .build();
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(approvalService.initiateServiceAssignment(authentication, initiation));
     }
 
     @Operation(
@@ -513,12 +555,21 @@ public class AdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))
             )
     })
+    @PreAuthorize("@adminGuard.canInitiateVendorActions(authentication)")
     @DeleteMapping("/users/{userId}/roles")
-    public ResponseEntity<AdminUserResponse> unassignRoles(
+    public ResponseEntity<ApprovalRequestResponse> unassignRoles(
             @Parameter(description = "Keycloak user id (the JWT `sub` claim)") @PathVariable String userId,
-            @Valid @RequestBody UserRolesRequest request
+            @Valid @RequestBody UserRolesRequest request,
+            Authentication authentication
     ) {
-        return ResponseEntity.ok(adminService.unassignRoles(userId, request));
+        InitiateServiceAssignmentRequest initiation = InitiateServiceAssignmentRequest.builder()
+                .targetKeycloakUserId(userId)
+                .roles(request.roles())
+                .mode("REVOKE")
+                .comment(request.comment())
+                .build();
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(approvalService.initiateServiceAssignment(authentication, initiation));
     }
 
 }
