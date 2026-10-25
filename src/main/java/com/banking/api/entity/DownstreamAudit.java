@@ -27,6 +27,9 @@ public class DownstreamAudit {
     @Column(name = "user_id")
     private String userId;
 
+    @Column(name = "service_name")
+    private String serviceName;
+
     @Column(name = "operation")
     private String operation;
 

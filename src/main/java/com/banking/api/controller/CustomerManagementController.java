@@ -1,5 +1,6 @@
 package com.banking.api.controller;
 
+import com.banking.api.dto.RoleApprovalRequest;
 import com.banking.api.dto.RoleChangeApplicationRequest;
 import com.banking.api.dto.RoleChangeApplicationResponse;
 import com.banking.api.exception.ErrorResponse;
@@ -187,11 +188,13 @@ public class CustomerManagementController {
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public ResponseEntity<RoleChangeApplicationResponse> approveApplication(
             Authentication authentication,
-            @Parameter(description = "Application identifier") @PathVariable UUID applicationId
+            @Parameter(description = "Application identifier") @PathVariable UUID applicationId,
+            @RequestBody(required = false) RoleApprovalRequest body
     ) {
         return ResponseEntity.ok(customerManagementService.approveApplication(
                 applicationId,
-                subject(authentication)
+                subject(authentication),
+                body == null ? null : body.rejectedRoles()
         ));
     }
 

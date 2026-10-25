@@ -38,7 +38,7 @@ class DownstreamAuditServiceTest {
 
         DownstreamAuditRepository repository = mock(DownstreamAuditRepository.class);
         Page<DownstreamAudit> audits = new PageImpl<>(List.of(audit), PageRequest.of(0, 10), 1);
-        when(repository.findAll(PageRequest.of(0, 10))).thenReturn(audits);
+        when(repository.findAll(PageRequest.of(0, 10, org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "startTime")))).thenReturn(audits);
 
         Page<DownstreamAuditResponse> result =
                 new DownstreamAuditService(repository).findAll(PageRequest.of(0, 10));
@@ -63,7 +63,7 @@ class DownstreamAuditServiceTest {
         audit.setEndTime(ended);
 
         DownstreamAuditRepository repository = mock(DownstreamAuditRepository.class);
-        when(repository.findAll(PageRequest.of(0, 10)))
+        when(repository.findAll(PageRequest.of(0, 10, org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "startTime"))))
                 .thenReturn(new PageImpl<>(List.of(audit), PageRequest.of(0, 10), 1));
 
         DownstreamAuditResponse record =

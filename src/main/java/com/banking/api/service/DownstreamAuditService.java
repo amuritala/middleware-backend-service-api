@@ -7,7 +7,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.util.regex.Pattern;
@@ -34,7 +36,11 @@ public class DownstreamAuditService {
     private final DownstreamAuditRepository repository;
 
     public Page<DownstreamAuditResponse> findAll(Pageable pageable) {
-        return repository.findAll(pageable).map(audit -> new DownstreamAuditResponse(
+        Pageable ordered = pageable.getSort().isSorted()
+                ? pageable
+                : PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                        Sort.by(Sort.Direction.DESC, "startTime"));
+        return repository.findAll(ordered).map(audit -> new DownstreamAuditResponse(
                 audit.getId(),
                 audit.getUserId(),
                 audit.getOperation(),

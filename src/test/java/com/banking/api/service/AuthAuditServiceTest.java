@@ -29,6 +29,7 @@ class AuthAuditServiceTest {
         ArgumentCaptor<DownstreamAudit> captor = ArgumentCaptor.forClass(DownstreamAudit.class);
         verify(repository).save(captor.capture());
         DownstreamAudit row = captor.getValue();
+        assertEquals("login", row.getServiceName());
         assertEquals("login", row.getOperation());
         assertEquals("jane@bank.com", row.getUserId());
         assertEquals(200, row.getHttpStatus());

@@ -35,6 +35,7 @@ public class AuthAuditService {
 
             DownstreamAudit audit = new DownstreamAudit();
             audit.setUserId(userId);
+            audit.setServiceName("login");
             audit.setOperation(operation);
             audit.setRequest(objectMapper.writeValueAsString(request));
             audit.setResponse(response == null ? null : objectMapper.writeValueAsString(response));

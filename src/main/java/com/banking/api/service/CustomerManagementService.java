@@ -97,8 +97,25 @@ public class CustomerManagementService {
 
     @Transactional
     public RoleChangeApplicationResponse approveApplication(UUID applicationId, String reviewer) {
+        return approveApplication(applicationId, reviewer, Set.of());
+    }
+
+    /** Approves the application after dropping the given newly requested roles from it. */
+    @Transactional
+    public RoleChangeApplicationResponse approveApplication(
+            UUID applicationId, String reviewer, Set<String> rejectedRoles) {
         RoleChangeApplication application = findApplication(applicationId);
         ensurePending(application);
+
+        if (rejectedRoles != null && !rejectedRoles.isEmpty()) {
+            Set<String> newRoles = application.getNewlyRequestedRoles();
+            if (!newRoles.containsAll(rejectedRoles)) {
+                throw new IllegalArgumentException(
+                        "Only newly requested roles can be declined: " + rejectedRoles);
+            }
+            application.getRequestedRoles().removeAll(rejectedRoles);
+            newRoles.removeAll(rejectedRoles);
+        }
 
         User user = findUser(application.getKeycloakUserId());
         replaceKeycloakRoles(application.getKeycloakUserId(), application.getRequestedRoles());
