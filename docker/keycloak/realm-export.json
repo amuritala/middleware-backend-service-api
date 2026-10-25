@@ -32,7 +32,7 @@
         "description": "May request creation of bank users"
       },
       {
-        "name": "ROLE_REGISTER_USER",
+        "name": "ROLE_REGISTER_VENDOR",
         "description": "May request registration of clients"
       },
       {

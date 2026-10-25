@@ -53,7 +53,7 @@ public class AdminController {
 
     @Operation(
             summary = "Request a client registration",
-            description = "Queues a client (vendor) registration for authorisation. Requires ROLE_REGISTER_USER; "
+            description = "Queues a client (vendor) registration for authorisation. Requires ROLE_REGISTER_VENDOR; "
                     + "the client is only created, active, once someone with ROLE_AUTHORISE_REGISTRATION approves.",
             tags = "Admin - Clients"
     )
@@ -62,13 +62,13 @@ public class AdminController {
                     content = @Content(schema = @Schema(implementation = UserCreationRequestResponse.class))),
             @ApiResponse(responseCode = "400", description = "Validation failed",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "403", description = "Caller does not hold ROLE_REGISTER_USER",
+            @ApiResponse(responseCode = "403", description = "Caller does not hold ROLE_REGISTER_VENDOR",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "409", description = "Email already registered or already pending",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     @PostMapping("/user-requests/clients")
-    @PreAuthorize("hasAuthority('ROLE_REGISTER_USER')")
+    @PreAuthorize("hasAuthority('ROLE_REGISTER_VENDOR')")
     public ResponseEntity<UserCreationRequestResponse> requestClient(
             @Valid @RequestBody RegisterRequest request, Authentication authentication) {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -102,7 +102,7 @@ public class AdminController {
             tags = "Admin - Users"
     )
     @GetMapping("/user-requests")
-    @PreAuthorize("hasAnyAuthority('ROLE_CREATE_USER','ROLE_REGISTER_USER','ROLE_AUTHORISE_USER_CREATION','ROLE_AUTHORISE_REGISTRATION')")
+    @PreAuthorize("hasAnyAuthority('ROLE_CREATE_USER','ROLE_REGISTER_VENDOR','ROLE_AUTHORISE_USER_CREATION','ROLE_AUTHORISE_REGISTRATION')")
     public ResponseEntity<List<UserCreationRequestResponse>> listUserRequests(
             @RequestParam(required = false) UserCreationRequestStatus status) {
         return ResponseEntity.ok(userCreationRequestService.list(status));

@@ -195,7 +195,7 @@ public class AdminService {
     /** Creates the user-creation workflow roles in Keycloak if the realm predates them. */
     public void ensureUserCreationRoles() {
         RolesResource roles = keycloakAdmin.realm(realm).roles();
-        for (String name : List.of("ROLE_CREATE_USER", "ROLE_REGISTER_USER",
+        for (String name : List.of("ROLE_CREATE_USER", "ROLE_REGISTER_VENDOR",
                 "ROLE_AUTHORISE_USER_CREATION", "ROLE_AUTHORISE_REGISTRATION")) {
             boolean exists = roles.list().stream().anyMatch(r -> name.equals(r.getName()));
             if (!exists) {
@@ -342,7 +342,7 @@ public class AdminService {
                 "offline_access",
                 "ROLE_CLIENT",
                 "ROLE_CREATE_USER",
-                "ROLE_REGISTER_USER",
+                "ROLE_REGISTER_VENDOR",
                 "ROLE_AUTHORISE_USER_CREATION",
                 "ROLE_AUTHORISE_REGISTRATION"
         );
@@ -409,7 +409,7 @@ public class AdminService {
             "ROLE_AUTHORISE_REGISTRATION",
             "ROLE_AUTHORISE_USER_CREATION",
             "ROLE_CREATE_USER",
-            "ROLE_REGISTER_USER");
+            "ROLE_REGISTER_VENDOR");
 
     public List<String> getAssignableBankUserRoles() {
         return BANK_USER_ASSIGNABLE_ROLES;
@@ -437,13 +437,13 @@ public class AdminService {
     /** Requesters and their authorisers must be different people: the roles are mutually exclusive. */
     static void ensureMakerCheckerSeparation(Set<String> roles) {
         boolean userAuthoriser = roles.contains("ROLE_AUTHORISE_USER_CREATION");
-        if (userAuthoriser && (roles.contains("ROLE_CREATE_USER") || roles.contains("ROLE_REGISTER_USER"))) {
+        if (userAuthoriser && (roles.contains("ROLE_CREATE_USER") || roles.contains("ROLE_REGISTER_VENDOR"))) {
             throw new IllegalArgumentException(
-                    "ROLE_AUTHORISE_USER_CREATION cannot be combined with ROLE_CREATE_USER or ROLE_REGISTER_USER");
+                    "ROLE_AUTHORISE_USER_CREATION cannot be combined with ROLE_CREATE_USER or ROLE_REGISTER_VENDOR");
         }
-        if (roles.contains("ROLE_AUTHORISE_REGISTRATION") && roles.contains("ROLE_REGISTER_USER")) {
+        if (roles.contains("ROLE_AUTHORISE_REGISTRATION") && roles.contains("ROLE_REGISTER_VENDOR")) {
             throw new IllegalArgumentException(
-                    "ROLE_AUTHORISE_REGISTRATION cannot be combined with ROLE_REGISTER_USER");
+                    "ROLE_AUTHORISE_REGISTRATION cannot be combined with ROLE_REGISTER_VENDOR");
         }
     }
 

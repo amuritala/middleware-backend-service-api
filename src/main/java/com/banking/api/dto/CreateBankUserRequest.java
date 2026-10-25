@@ -43,6 +43,6 @@ public class CreateBankUserRequest {
     private String password;
 
     @Schema(description = "Optional extra realm roles granted on approval (ROLE_ADMIN is always added). "
-            + "ROLE_AUTHORISE_USER_CREATION cannot be combined with ROLE_CREATE_USER or ROLE_REGISTER_USER.")
+            + "ROLE_AUTHORISE_USER_CREATION cannot be combined with ROLE_CREATE_USER or ROLE_REGISTER_VENDOR.")
     private java.util.List<String> roles;
 }
