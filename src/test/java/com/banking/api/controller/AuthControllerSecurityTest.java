@@ -33,6 +33,9 @@ class AuthControllerSecurityTest {
     private AuthService authService;
 
     @MockitoBean
+    private com.banking.api.service.AuthAuditService auditService;
+
+    @MockitoBean
     private org.springframework.security.oauth2.jwt.JwtDecoder jwtDecoder;
 
     @Test

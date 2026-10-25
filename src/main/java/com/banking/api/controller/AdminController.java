@@ -3,6 +3,9 @@ package com.banking.api.controller;
 import com.banking.api.dto.ApproveClientRequest;
 import com.banking.api.dto.ClientResponse;
 import com.banking.api.dto.CreateBankUserRequest;
+import com.banking.api.dto.UserCreationRequestResponse;
+import com.banking.api.entity.UserCreationRequestStatus;
+import com.banking.api.service.UserCreationRequestService;
 import com.banking.api.dto.RegisterRequest;
 import com.banking.api.dto.AdminUserResponse;
 import com.banking.api.dto.UpdateUserRequest;
@@ -46,54 +49,91 @@ public class AdminController {
 
     private final AdminService adminService;
     private final DownstreamAuditService downstreamAuditService;
+    private final UserCreationRequestService userCreationRequestService;
 
     @Operation(
-            summary = "Create a vendor account directly",
-            description = "Creates the Keycloak user with the supplied temporary password and activates the client "
-                    + "immediately - admin-created vendors never pass through the PENDING review queue. The local "
-                    + "user is flagged so the vendor must change the temporary password at first sign-in. "
-                    + "ROLE_CLIENT is assigned automatically; grant service roles afterwards through the user "
-                    + "management endpoints.",
+            summary = "Request a client registration",
+            description = "Queues a client (vendor) registration for authorisation. Requires ROLE_REGISTER_USER; "
+                    + "the client is only created, active, once someone with ROLE_AUTHORISE_REGISTRATION approves.",
             tags = "Admin - Clients"
     )
     @ApiResponses({
-            @ApiResponse(
-                    responseCode = "201",
-                    description = "Client created and already active",
-                    content = @Content(schema = @Schema(implementation = ClientResponse.class))
-            ),
-            @ApiResponse(
-                    responseCode = "400",
-                    description = "Validation failed - `details` maps each field name to its message",
-                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))
-            ),
-            @ApiResponse(
-                    responseCode = "403",
-                    description = "Caller does not hold ROLE_ADMIN",
-                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))
-            ),
-            @ApiResponse(
-                    responseCode = "409",
-                    description = "A user with this email address already exists",
-                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))
-            )
+            @ApiResponse(responseCode = "201", description = "Request queued",
+                    content = @Content(schema = @Schema(implementation = UserCreationRequestResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Validation failed",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Caller does not hold ROLE_REGISTER_USER",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "409", description = "Email already registered or already pending",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
-    @PostMapping("/clients")
-    public ResponseEntity<ClientResponse> createClient(@Valid @RequestBody RegisterRequest request) {
-        log.info("Admin creating client: {}", request.getCompanyName());
-        return ResponseEntity.status(HttpStatus.CREATED).body(adminService.createClient(request));
+    @PostMapping("/user-requests/clients")
+    @PreAuthorize("hasAuthority('ROLE_REGISTER_USER')")
+    public ResponseEntity<UserCreationRequestResponse> requestClient(
+            @Valid @RequestBody RegisterRequest request, Authentication authentication) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(userCreationRequestService.submitClient(request, actor(authentication)));
+    }
+
+    @Operation(summary = "Roles assignable to a new bank user", tags = "Admin - Users")
+    @GetMapping("/bank-user-roles")
+    @PreAuthorize("hasAuthority('ROLE_CREATE_USER')")
+    public ResponseEntity<List<String>> getBankUserRoles() {
+        return ResponseEntity.ok(adminService.getAssignableBankUserRoles());
     }
 
     @Operation(
-            summary = "Create a bank user",
-            description = "Creates a staff administrator with ROLE_ADMIN and a temporary password that is "
-                    + "emailed to them and must be changed at first sign-in.",
+            summary = "Request a bank user",
+            description = "Queues a bank-user creation request for authorisation. Requires ROLE_CREATE_USER; "
+                    + "the account is only created once someone with ROLE_AUTHORISE_USER_CREATION approves.",
             tags = "Admin - Users"
     )
-    @PostMapping("/users")
-    public ResponseEntity<AdminUserResponse> createBankUser(@Valid @RequestBody CreateBankUserRequest request) {
-        log.info("Admin creating bank user: {}", request.getEmail());
-        return ResponseEntity.status(HttpStatus.CREATED).body(adminService.createBankUser(request));
+    @PostMapping("/user-requests")
+    @PreAuthorize("hasAuthority('ROLE_CREATE_USER')")
+    public ResponseEntity<UserCreationRequestResponse> requestBankUser(
+            @Valid @RequestBody CreateBankUserRequest request, Authentication authentication) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(userCreationRequestService.submit(request, actor(authentication)));
+    }
+
+    @Operation(
+            summary = "List bank-user creation requests",
+            description = "Filter by status (PENDING, APPROVED, REJECTED); all requests when omitted.",
+            tags = "Admin - Users"
+    )
+    @GetMapping("/user-requests")
+    @PreAuthorize("hasAnyAuthority('ROLE_CREATE_USER','ROLE_REGISTER_USER','ROLE_AUTHORISE_USER_CREATION','ROLE_AUTHORISE_REGISTRATION')")
+    public ResponseEntity<List<UserCreationRequestResponse>> listUserRequests(
+            @RequestParam(required = false) UserCreationRequestStatus status) {
+        return ResponseEntity.ok(userCreationRequestService.list(status));
+    }
+
+    @Operation(summary = "Approve a bank-user creation request", tags = "Admin - Users")
+    @PutMapping("/user-requests/{id}/approve")
+    @PreAuthorize("hasAnyAuthority('ROLE_AUTHORISE_USER_CREATION','ROLE_AUTHORISE_REGISTRATION')")
+    public ResponseEntity<UserCreationRequestResponse> approveUserRequest(
+            @PathVariable UUID id, Authentication authentication) {
+        return ResponseEntity.ok(userCreationRequestService.approve(id, actor(authentication), authorities(authentication)));
+    }
+
+    @Operation(summary = "Reject a bank-user creation request", tags = "Admin - Users")
+    @PutMapping("/user-requests/{id}/reject")
+    @PreAuthorize("hasAnyAuthority('ROLE_AUTHORISE_USER_CREATION','ROLE_AUTHORISE_REGISTRATION')")
+    public ResponseEntity<UserCreationRequestResponse> rejectUserRequest(
+            @PathVariable UUID id, Authentication authentication) {
+        return ResponseEntity.ok(userCreationRequestService.reject(id, actor(authentication), authorities(authentication)));
+    }
+
+    private static java.util.Set<String> authorities(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .map(org.springframework.security.core.GrantedAuthority::getAuthority)
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
+    private static String actor(Authentication authentication) {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        String email = jwt.getClaimAsString("email");
+        return email != null ? email : jwt.getClaimAsString("preferred_username");
     }
 
     @Operation(

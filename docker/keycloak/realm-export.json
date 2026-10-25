@@ -28,6 +28,22 @@
         "description": "Client role"
       },
       {
+        "name": "ROLE_CREATE_USER",
+        "description": "May request creation of bank users"
+      },
+      {
+        "name": "ROLE_REGISTER_USER",
+        "description": "May request registration of clients"
+      },
+      {
+        "name": "ROLE_AUTHORISE_REGISTRATION",
+        "description": "May approve or reject client registration requests"
+      },
+      {
+        "name": "ROLE_AUTHORISE_USER_CREATION",
+        "description": "May approve or reject bank user creation requests"
+      },
+      {
         "name": "ROLE_CREATE_CUSTOMER",
         "description": "Create customer role"
       },

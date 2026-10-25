@@ -35,7 +35,9 @@ public class ServiceCatalogController {
 
     /** Roles that come with the account or the realm and are never requestable services. */
     private static final Set<String> SYSTEM_ROLES = Set.of(
-            "ROLE_ADMIN", "ROLE_CLIENT", "default-roles-banking", "uma_authorization", "offline_access"
+            "ROLE_ADMIN", "ROLE_CLIENT", "ROLE_CREATE_USER", "ROLE_REGISTER_USER", "ROLE_AUTHORISE_USER_CREATION",
+            "ROLE_AUTHORISE_REGISTRATION",
+            "default-roles-banking", "uma_authorization", "offline_access"
     );
 
     private final Keycloak keycloakAdmin;

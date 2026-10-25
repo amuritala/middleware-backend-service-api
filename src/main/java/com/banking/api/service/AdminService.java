@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.resource.RealmResource;
+import org.keycloak.admin.client.resource.RolesResource;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
@@ -151,6 +152,7 @@ public class AdminService {
                 .build());
 
         assignRealmRole(keycloakUserId, "ROLE_ADMIN");
+        validateBankUserRoles(request.getRoles()).forEach(role -> assignRealmRole(keycloakUserId, role));
         log.info("Admin-created bank user {} with ROLE_ADMIN", request.getEmail());
 
         welcomeEmailService.sendTemporaryPassword(
@@ -187,6 +189,22 @@ public class AdminService {
                 throw new RuntimeException("Failed to create Keycloak user");
             }
             return response.getLocation().getPath().replaceAll(".*/([^/]+)$", "$1");
+        }
+    }
+
+    /** Creates the user-creation workflow roles in Keycloak if the realm predates them. */
+    public void ensureUserCreationRoles() {
+        RolesResource roles = keycloakAdmin.realm(realm).roles();
+        for (String name : List.of("ROLE_CREATE_USER", "ROLE_REGISTER_USER",
+                "ROLE_AUTHORISE_USER_CREATION", "ROLE_AUTHORISE_REGISTRATION")) {
+            boolean exists = roles.list().stream().anyMatch(r -> name.equals(r.getName()));
+            if (!exists) {
+                RoleRepresentation role = new RoleRepresentation();
+                role.setName(name);
+                role.setDescription("User creation workflow");
+                roles.create(role);
+                log.info("Created Keycloak realm role {}", name);
+            }
         }
     }
 
@@ -322,7 +340,11 @@ public class AdminService {
                 "default-roles-banking",
                 "uma_authorization",
                 "offline_access",
-                "ROLE_CLIENT"
+                "ROLE_CLIENT",
+                "ROLE_CREATE_USER",
+                "ROLE_REGISTER_USER",
+                "ROLE_AUTHORISE_USER_CREATION",
+                "ROLE_AUTHORISE_REGISTRATION"
         );
 
         return keycloakAdmin
@@ -374,8 +396,55 @@ public class AdminService {
     public AdminUserResponse assignRoles(String userId, UserRolesRequest request) {
         UserResource userResource = keycloakUser(userId);
         List<RoleRepresentation> roles = resolveServiceRoles(request.roles());
+        Set<String> resulting = userResource.roles().realmLevel().listAll().stream()
+                .map(RoleRepresentation::getName).collect(Collectors.toCollection(java.util.HashSet::new));
+        roles.forEach(role -> resulting.add(role.getName()));
+        ensureMakerCheckerSeparation(resulting);
         userResource.roles().realmLevel().add(roles);
         return toAdminUserResponse(userResource.toRepresentation());
+    }
+
+    /** The only roles that can be chosen when requesting a bank user. */
+    private static final List<String> BANK_USER_ASSIGNABLE_ROLES = List.of(
+            "ROLE_AUTHORISE_REGISTRATION",
+            "ROLE_AUTHORISE_USER_CREATION",
+            "ROLE_CREATE_USER",
+            "ROLE_REGISTER_USER");
+
+    public List<String> getAssignableBankUserRoles() {
+        return BANK_USER_ASSIGNABLE_ROLES;
+    }
+
+    /** Returns the cleaned role list, or throws if a role is unknown, protected or conflicting. */
+    public List<String> validateBankUserRoles(List<String> requested) {
+        if (requested == null || requested.isEmpty()) {
+            return List.of();
+        }
+        List<String> cleaned = requested.stream()
+                .map(r -> r == null ? "" : r.trim()).filter(r -> !r.isBlank()).distinct().toList();
+        if (cleaned.isEmpty()) {
+            return List.of();
+        }
+        Set<String> assignable = Set.copyOf(getAssignableBankUserRoles());
+        Set<String> invalid = cleaned.stream().filter(r -> !assignable.contains(r)).collect(Collectors.toSet());
+        if (!invalid.isEmpty()) {
+            throw new IllegalArgumentException("Roles cannot be assigned to a bank user: " + invalid);
+        }
+        ensureMakerCheckerSeparation(Set.copyOf(cleaned));
+        return cleaned;
+    }
+
+    /** Requesters and their authorisers must be different people: the roles are mutually exclusive. */
+    static void ensureMakerCheckerSeparation(Set<String> roles) {
+        boolean userAuthoriser = roles.contains("ROLE_AUTHORISE_USER_CREATION");
+        if (userAuthoriser && (roles.contains("ROLE_CREATE_USER") || roles.contains("ROLE_REGISTER_USER"))) {
+            throw new IllegalArgumentException(
+                    "ROLE_AUTHORISE_USER_CREATION cannot be combined with ROLE_CREATE_USER or ROLE_REGISTER_USER");
+        }
+        if (roles.contains("ROLE_AUTHORISE_REGISTRATION") && roles.contains("ROLE_REGISTER_USER")) {
+            throw new IllegalArgumentException(
+                    "ROLE_AUTHORISE_REGISTRATION cannot be combined with ROLE_REGISTER_USER");
+        }
     }
 
     public AdminUserResponse unassignRoles(String userId, UserRolesRequest request) {

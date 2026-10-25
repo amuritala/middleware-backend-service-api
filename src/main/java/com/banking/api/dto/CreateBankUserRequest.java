@@ -41,4 +41,8 @@ public class CreateBankUserRequest {
     @Schema(description = "Temporary password, emailed to the user and replaced at first sign-in.",
             example = "S3cure!pass")
     private String password;
+
+    @Schema(description = "Optional extra realm roles granted on approval (ROLE_ADMIN is always added). "
+            + "ROLE_AUTHORISE_USER_CREATION cannot be combined with ROLE_CREATE_USER or ROLE_REGISTER_USER.")
+    private java.util.List<String> roles;
 }
